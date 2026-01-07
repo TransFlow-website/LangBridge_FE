@@ -15,13 +15,50 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  margin-bottom: 0.5rem;
+}
+
+.translation-header .subtitle {
+  color: #666;
+  font-size: 1.1rem;
 }
 
 .translation-main {
-  max-width: 900px;
+  max-width: 1000px;
   margin: 0 auto;
 }
 
+/* 모드 선택 탭 */
+.mode-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+  justify-content: center;
+}
+
+.mode-tab {
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  background-color: #f5f5f5;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color: #666;
+}
+
+.mode-tab:hover {
+  background-color: #e8e8e8;
+}
+
+.mode-tab.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+/* 언어 선택 */
 .language-selector {
   display: flex;
   justify-content: center;
@@ -38,6 +75,7 @@
   background-color: white;
   cursor: pointer;
   transition: border-color 0.3s ease;
+  min-width: 150px;
 }
 
 .lang-select:hover {
@@ -59,9 +97,174 @@
   transition: background-color 0.3s ease, transform 0.3s ease;
 }
 
-.swap-button:hover {
+.swap-button:hover:not(:disabled) {
   background-color: #e0e0e0;
   transform: rotate(180deg);
+}
+
+.swap-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 오류 메시지 */
+.error-message {
+  padding: 1rem;
+  background-color: #fee;
+  border-left: 4px solid #f44;
+  border-radius: 8px;
+  color: #c33;
+  margin-bottom: 1.5rem;
+  font-weight: 500;
+}
+
+/* URL 번역 */
+.url-translation {
+  margin-top: 1rem;
+}
+
+.url-input-section {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.url-input {
+  flex: 1;
+  padding: 1rem 1.5rem;
+  font-size: 1rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  transition: border-color 0.3s ease;
+}
+
+.url-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.url-input::placeholder {
+  color: #999;
+}
+
+/* 로딩 스피너 */
+.loading-spinner {
+  text-align: center;
+  padding: 3rem;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 1rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-spinner p {
+  color: #666;
+  margin: 0.5rem 0;
+}
+
+.loading-tip {
+  font-size: 0.9rem;
+  color: #999;
+}
+
+/* URL 번역 결과 */
+.url-result {
+  margin-top: 2rem;
+}
+
+.result-section {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 1rem;
+}
+
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.result-header h3 {
+  font-size: 1.3rem;
+  color: #333;
+  margin: 0;
+}
+
+.copy-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.copy-button:hover {
+  background-color: #667eea;
+  color: white;
+  border-color: #667eea;
+}
+
+.result-content {
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.result-content.original {
+  background-color: #f8f9fa;
+  border-left: 4px solid #6c757d;
+}
+
+.result-content.translated {
+  background-color: #f0f8ff;
+  border-left: 4px solid #667eea;
+}
+
+.result-meta {
+  font-size: 0.9rem;
+  color: #666;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.result-text {
+  white-space: pre-wrap;
+  line-height: 1.8;
+  color: #333;
+  font-size: 1rem;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.result-divider {
+  text-align: center;
+  margin: 1.5rem 0;
+}
+
+.result-divider span {
+  font-size: 2rem;
+  color: #667eea;
+}
+
+/* 텍스트 번역 */
+.text-translation {
+  margin-top: 1rem;
 }
 
 .translation-boxes {
@@ -93,6 +296,7 @@
   font-size: 1rem;
   white-space: pre-wrap;
   color: #333;
+  line-height: 1.6;
 }
 
 .text-info {
@@ -100,6 +304,8 @@
   color: #999;
   font-size: 0.875rem;
   margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #f0f0f0;
 }
 
 .loading {
@@ -111,6 +317,7 @@
   font-size: 1.2rem;
 }
 
+/* 번역 버튼 */
 .translate-button {
   display: block;
   width: 100%;
@@ -124,6 +331,7 @@
   border-radius: 8px;
   cursor: pointer;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
+  font-weight: 600;
 }
 
 .translate-button:hover:not(:disabled) {
@@ -136,6 +344,7 @@
   cursor: not-allowed;
 }
 
+/* 반응형 디자인 */
 @media (max-width: 768px) {
   .translation-boxes {
     grid-template-columns: 1fr;
@@ -148,5 +357,82 @@
   .lang-select {
     width: 100%;
   }
+
+  .mode-tabs {
+    flex-direction: column;
+  }
+
+  .mode-tab {
+    width: 100%;
+  }
+
+  .url-input-section {
+    flex-direction: column;
+  }
+
+  .translation-header h1 {
+    font-size: 2rem;
+  }
+
+  .result-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
 }
 
+/* 다크모드 지원 */
+@media (prefers-color-scheme: dark) {
+  .translation-container {
+    color: #e0e0e0;
+  }
+
+  .mode-tab {
+    background-color: #2a2a2a;
+    color: #ccc;
+  }
+
+  .mode-tab:hover {
+    background-color: #3a3a3a;
+  }
+
+  .lang-select,
+  .url-input,
+  .text-box {
+    background-color: #2a2a2a;
+    border-color: #444;
+    color: #e0e0e0;
+  }
+
+  .swap-button {
+    background-color: #2a2a2a;
+  }
+
+  .swap-button:hover:not(:disabled) {
+    background-color: #3a3a3a;
+  }
+
+  .result-section {
+    background-color: #2a2a2a;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .result-content.original {
+    background-color: #333;
+  }
+
+  .result-content.translated {
+    background-color: #2a3a4a;
+  }
+
+  .result-text,
+  .text-output {
+    color: #e0e0e0;
+  }
+
+  .copy-button {
+    background-color: #3a3a3a;
+    border-color: #555;
+    color: #e0e0e0;
+  }
+}
