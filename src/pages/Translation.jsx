@@ -13,12 +13,18 @@ function Translation() {
   const [url, setUrl] = useState('')
   const [urlResult, setUrlResult] = useState(null)
   const iframeRef = useRef(null)
+  const originalIframeRef = useRef(null) // 원본 페이지용 iframe
+  const translatedIframeRef = useRef(null) // 번역본 페이지용 iframe
   const [editedHtml, setEditedHtml] = useState('')
+  const [editedOriginalHtml, setEditedOriginalHtml] = useState('') // 편집된 원본 HTML
   
   // 영역 선택 모드
   const [isSelectionMode, setIsSelectionMode] = useState(false)
   const [originalPageLoaded, setOriginalPageLoaded] = useState(false)
   const [selectedElements, setSelectedElements] = useState([]) // 여러 영역 선택
+  const [isPreEditMode, setIsPreEditMode] = useState(false) // 번역 전 원본 편집 모드
+  const [isComparisonMode, setIsComparisonMode] = useState(false) // 번역 후 비교 편집 모드
+  const [fullscreenMode, setFullscreenMode] = useState(null) // 'original' | 'translated' | null
   
   // 공통 state
   const [sourceLang, setSourceLang] = useState('auto')
@@ -80,6 +86,9 @@ function Translation() {
     setOriginalPageLoaded(false)
     setIsSelectionMode(false) // 먼저 비활성화
     setSelectedElements([]) // 선택된 영역 초기화
+    setIsPreEditMode(false) // 원본 편집 모드 초기화
+    setIsComparisonMode(false) // 비교 모드 초기화
+    setEditedOriginalHtml('') // 편집된 원본 HTML 초기화
 
     try {
       // 원본 HTML만 가져오기 (번역 없이)
@@ -153,15 +162,241 @@ function Translation() {
 
   // iframe에 HTML 렌더링 및 영역 선택/편집 가능하게 만들기
   useEffect(() => {
-    console.log('useEffect 실행:', {
-      hasIframe: !!iframeRef.current,
-      hasUrlResult: !!urlResult,
-      hasOriginalHtml: !!urlResult?.originalHtml,
-      hasTranslatedHtml: !!urlResult?.translatedHtml,
-      isSelectionMode,
-      originalPageLoaded
-    })
+    // 원본 편집 모드: editedOriginalHtml 렌더링
+    if (isPreEditMode && editedOriginalHtml && iframeRef.current) {
+      const iframe = iframeRef.current
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
+      
+      if (iframeDoc) {
+        let htmlContent = editedOriginalHtml
+        
+        // HTML 구조 확인 및 보완
+        const hasDoctype = htmlContent.trim().toLowerCase().startsWith('<!doctype')
+        const hasHtml = htmlContent.includes('<html')
+        const hasBody = htmlContent.includes('<body')
+        
+        if (!hasDoctype || !hasHtml || !hasBody) {
+          if (!htmlContent.includes('<body')) {
+            htmlContent = `<body>${htmlContent}</body>`
+          }
+          if (!htmlContent.includes('<html')) {
+            htmlContent = `<html>${htmlContent}</html>`
+          }
+          if (!htmlContent.includes('<head>')) {
+            htmlContent = htmlContent.replace('<html>', '<html><head></head>')
+          }
+          if (!hasDoctype) {
+            htmlContent = `<!DOCTYPE html>${htmlContent}`
+          }
+        }
+        
+        // CSS 추가
+        if (urlResult?.css) {
+          const cssTag = `<style id="transflow-css">\n${urlResult.css}\n</style>`
+          if (htmlContent.includes('</head>')) {
+            htmlContent = htmlContent.replace('</head>', `${cssTag}\n</head>`)
+          } else if (htmlContent.includes('<html')) {
+            htmlContent = htmlContent.replace('<html>', `<html><head>${cssTag}</head>`)
+          }
+        }
+        
+        // 편집 스타일 추가
+        const editStyle = `
+          <style id="transflow-editor-style">
+            body {
+              -webkit-user-select: text !important;
+              user-select: text !important;
+              cursor: text !important;
+              overflow-x: auto !important;
+              overflow-y: auto !important;
+            }
+            [contenteditable="true"] {
+              outline: 2px dashed #ff9800 !important;
+              outline-offset: 2px;
+              min-height: 1em;
+            }
+            [contenteditable="true"]:focus {
+              outline: 3px solid #ff9800 !important;
+              background-color: rgba(255, 152, 0, 0.05) !important;
+            }
+          </style>
+        `
+        if (htmlContent.includes('</head>')) {
+          htmlContent = htmlContent.replace('</head>', `${editStyle}\n</head>`)
+        } else if (htmlContent.includes('<html')) {
+          if (!htmlContent.includes('<head>')) {
+            htmlContent = htmlContent.replace('<html>', `<html><head>${editStyle}</head>`)
+          } else {
+            htmlContent = htmlContent.replace('<head>', `<head>${editStyle}`)
+          }
+        }
+        
+        iframeDoc.open()
+        iframeDoc.write(htmlContent)
+        iframeDoc.close()
+        
+        setTimeout(() => {
+          if (iframeDoc.body) {
+            enableTextEditing(iframeDoc)
+            // 편집 내용 추적
+            iframeDoc.body.addEventListener('input', () => {
+              const updatedHtml = iframeDoc.documentElement.outerHTML
+              setEditedOriginalHtml(updatedHtml)
+            })
+          }
+        }, 200)
+      }
+      return
+    }
     
+    // 비교 모드: 원본과 번역본 각각 렌더링 (전체화면 모드 포함)
+    if (isComparisonMode && urlResult) {
+      // 원본 iframe 렌더링 (전체화면 모드에서도 렌더링)
+      if (originalIframeRef.current && editedOriginalHtml && (fullscreenMode === 'original' || !fullscreenMode)) {
+        const originalIframe = originalIframeRef.current
+        const originalDoc = originalIframe.contentDocument || originalIframe.contentWindow?.document
+        
+        if (originalDoc) {
+          // 전체화면 모드로 전환할 때는 항상 렌더링 (내용 보존)
+          const hasContent = originalDoc.body && originalDoc.body.children.length > 0
+          const isFullscreenOriginal = fullscreenMode === 'original'
+          
+          // 전체화면 모드로 전환하거나 내용이 없을 때 렌더링
+          if (!hasContent || isFullscreenOriginal) {
+            // 전체화면 모드로 전환하는 경우 현재 내용을 가져와서 보존
+            let htmlToRender = editedOriginalHtml
+            if (isFullscreenOriginal && hasContent) {
+              // 현재 iframe의 내용을 가져와서 사용
+              htmlToRender = originalDoc.documentElement.outerHTML
+                .replace(/<style id="transflow-editor-style">[\s\S]*?<\/style>/g, '')
+                .replace(/<style id="transflow-css">[\s\S]*?<\/style>/g, '')
+            }
+            
+            let htmlContent = htmlToRender
+            // HTML 구조 보완
+            if (!htmlContent.includes('<html')) {
+              htmlContent = `<!DOCTYPE html><html><head></head><body>${htmlContent}</body></html>`
+            }
+            
+            if (urlResult.css) {
+              const cssTag = `<style id="transflow-css">\n${urlResult.css}\n</style>`
+              if (htmlContent.includes('</head>')) {
+                htmlContent = htmlContent.replace('</head>', `${cssTag}\n</head>`)
+              }
+            }
+            
+            const editStyle = `
+            <style id="transflow-editor-style">
+              body { 
+                -webkit-user-select: text !important; 
+                user-select: text !important; 
+                cursor: text !important;
+                overflow-x: auto !important;
+                overflow-y: auto !important;
+              }
+              [contenteditable="true"] { 
+                outline: 2px dashed #2196f3 !important; 
+                outline-offset: 2px; 
+              }
+              [contenteditable="true"]:focus {
+                outline: 3px solid #2196f3 !important;
+              }
+            </style>
+          `
+            if (htmlContent.includes('</head>')) {
+              htmlContent = htmlContent.replace('</head>', `${editStyle}\n</head>`)
+            }
+            
+            originalDoc.open()
+            originalDoc.write(htmlContent)
+            originalDoc.close()
+            
+            setTimeout(() => {
+              if (originalDoc.body) {
+                enableTextEditing(originalDoc)
+              }
+            }, 200)
+          }
+        }
+      }
+      
+      // 번역본 iframe 렌더링 (전체화면 모드에서도 렌더링)
+      if (translatedIframeRef.current && urlResult.translatedHtml && (fullscreenMode === 'translated' || !fullscreenMode)) {
+        const translatedIframe = translatedIframeRef.current
+        const translatedDoc = translatedIframe.contentDocument || translatedIframe.contentWindow?.document
+        
+        if (translatedDoc) {
+          // 전체화면 모드로 전환할 때는 항상 렌더링 (내용 보존)
+          const hasContent = translatedDoc.body && translatedDoc.body.children.length > 0
+          const isFullscreenTranslated = fullscreenMode === 'translated'
+          
+          // 전체화면 모드로 전환하거나 내용이 없을 때 렌더링
+          if (!hasContent || isFullscreenTranslated) {
+            // 전체화면 모드로 전환하는 경우 현재 내용을 가져와서 보존
+            let htmlToRender = editedHtml || urlResult.translatedHtml
+            if (isFullscreenTranslated && hasContent) {
+              // 현재 iframe의 내용을 가져와서 사용
+              htmlToRender = translatedDoc.documentElement.outerHTML
+                .replace(/<style id="transflow-editor-style">[\s\S]*?<\/style>/g, '')
+                .replace(/<style id="transflow-css">[\s\S]*?<\/style>/g, '')
+            }
+            
+            let htmlContent = htmlToRender
+            
+            if (!htmlContent.includes('<html')) {
+              htmlContent = `<!DOCTYPE html><html><head></head><body>${htmlContent}</body></html>`
+            }
+            
+            if (urlResult.css) {
+              const cssTag = `<style id="transflow-css">\n${urlResult.css}\n</style>`
+              if (htmlContent.includes('</head>')) {
+                htmlContent = htmlContent.replace('</head>', `${cssTag}\n</head>`)
+              }
+            }
+            
+            const editStyle = `
+              <style id="transflow-editor-style">
+                body { 
+                  -webkit-user-select: text !important; 
+                  user-select: text !important; 
+                  cursor: text !important;
+                  overflow-x: auto !important;
+                  overflow-y: auto !important;
+                }
+                [contenteditable="true"] { 
+                  outline: 2px dashed #4caf50 !important; 
+                  outline-offset: 2px; 
+                }
+                [contenteditable="true"]:focus {
+                  outline: 3px solid #4caf50 !important;
+                }
+              </style>
+            `
+            if (htmlContent.includes('</head>')) {
+              htmlContent = htmlContent.replace('</head>', `${editStyle}\n</head>`)
+            }
+            
+            translatedDoc.open()
+            translatedDoc.write(htmlContent)
+            translatedDoc.close()
+            
+            setTimeout(() => {
+              if (translatedDoc.body) {
+                enableTextEditing(translatedDoc)
+                // 번역본 편집 내용 추적
+                translatedDoc.body.addEventListener('input', () => {
+                  const updatedHtml = translatedDoc.documentElement.outerHTML
+                  setEditedHtml(updatedHtml)
+                })
+              }
+            }, 200)
+          }
+        }
+      }
+      return
+    }
+    
+    // 기존 로직: 영역 선택 모드 또는 기타
     if (iframeRef.current && urlResult) {
       const iframe = iframeRef.current
       const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
@@ -293,7 +528,7 @@ function Translation() {
         setTimeout(checkAndEnableSelection, 300)
       }
     }
-  }, [urlResult, isSelectionMode, originalPageLoaded])
+  }, [urlResult, isSelectionMode, originalPageLoaded, isPreEditMode, isComparisonMode, editedOriginalHtml, fullscreenMode])
   
   // 영역 선택 모드 활성화 (여러 영역 선택 가능)
   const enableElementSelection = (iframeDoc) => {
@@ -518,16 +753,200 @@ function Translation() {
       el.contentEditable = 'false'
     })
     
+    // Ctrl+Z (Undo) 및 Ctrl+Y (Redo) 기능 추가
+    // 백스페이스와 Delete는 기본 동작을 방해하지 않도록 주의
+    const handleKeyDown = (e) => {
+      // Ctrl+Z (또는 Cmd+Z on Mac) - Undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        iframeDoc.execCommand('undo', false, null)
+        return false
+      }
+      // Ctrl+Y 또는 Ctrl+Shift+Z (Redo)
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault()
+        e.stopPropagation()
+        iframeDoc.execCommand('redo', false, null)
+        return false
+      }
+      
+      // 백스페이스 키 처리: contentEditable에서 페이지 이동 및 스크롤 방지
+      if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const activeElement = iframeDoc.activeElement
+        
+        // contentEditable 요소 내에서만 처리
+        if (activeElement && activeElement.isContentEditable) {
+          // 현재 스크롤 위치 저장
+          const scrollTop = iframeDoc.documentElement.scrollTop || iframeDoc.body.scrollTop
+          const scrollLeft = iframeDoc.documentElement.scrollLeft || iframeDoc.body.scrollLeft
+          
+          // 백스페이스 후 스크롤 위치 복원
+          setTimeout(() => {
+            if (iframeDoc.documentElement) {
+              iframeDoc.documentElement.scrollTop = scrollTop
+              iframeDoc.documentElement.scrollLeft = scrollLeft
+            }
+            if (iframeDoc.body) {
+              iframeDoc.body.scrollTop = scrollTop
+              iframeDoc.body.scrollLeft = scrollLeft
+            }
+            // focus 유지
+            if (activeElement && activeElement.isContentEditable) {
+              activeElement.focus()
+            }
+          }, 0)
+        }
+        // 기본 동작 허용 (텍스트 삭제)
+      }
+    }
+    
+    // 키보드 이벤트 리스너 추가 (capture phase에서만 특정 키 처리)
+    iframeDoc.addEventListener('keydown', handleKeyDown, true)
+    
     // 변경 사항 추적
-    iframeDoc.body.addEventListener('input', () => {
+    const handleInput = () => {
       const updatedHtml = iframeDoc.documentElement.outerHTML
       setEditedHtml(updatedHtml)
-    })
+    }
+    iframeDoc.body.addEventListener('input', handleInput)
     
-    console.log('텍스트 편집 모드 활성화!')
+    console.log('텍스트 편집 모드 활성화! (Ctrl+Z 지원)')
   }
   
-  // 선택된 영역들 번역 (여러 영역을 한 번에)
+  // 영역 선택 후 원본 편집 모드로 전환
+  const handleStartPreEdit = () => {
+    if (selectedElements.length === 0) {
+      alert('편집할 영역을 먼저 선택해주세요.')
+      return
+    }
+    
+    const iframe = iframeRef.current
+    const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document
+    
+    if (!iframeDoc || !urlResult?.originalHtml) {
+      setError('원본 페이지를 불러올 수 없습니다.')
+      return
+    }
+    
+    // 선택된 영역만 남기고 나머지 제거
+    const selectedElementIds = new Set(selectedElements.map(sel => sel.id))
+    
+    // 선택되지 않은 요소 제거
+    const removeUnselectedElements = (element) => {
+      if (element.hasAttribute('data-transflow-id')) {
+        const elementId = element.getAttribute('data-transflow-id')
+        if (elementId && selectedElementIds.has(elementId)) {
+          return true
+        }
+      }
+      
+      const children = Array.from(element.children)
+      const childrenToKeep = []
+      
+      children.forEach(child => {
+        if (removeUnselectedElements(child)) {
+          childrenToKeep.push(child)
+        }
+      })
+      
+      if (childrenToKeep.length > 0) {
+        const allChildren = Array.from(element.children)
+        allChildren.forEach(child => {
+          if (!childrenToKeep.includes(child)) {
+            element.removeChild(child)
+          }
+        })
+        return true
+      }
+      
+      return false
+    }
+    
+    if (iframeDoc.body) {
+      const bodyChildren = Array.from(iframeDoc.body.children)
+      const bodyChildrenToKeep = []
+      
+      bodyChildren.forEach(child => {
+        if (removeUnselectedElements(child)) {
+          bodyChildrenToKeep.push(child)
+        }
+      })
+      
+      const allBodyChildren = Array.from(iframeDoc.body.children)
+      allBodyChildren.forEach(child => {
+        if (!bodyChildrenToKeep.includes(child)) {
+          iframeDoc.body.removeChild(child)
+        }
+      })
+      
+      // 선택 표시 제거
+      iframeDoc.querySelectorAll('.transflow-selected, .transflow-hovering').forEach(el => {
+        el.classList.remove('transflow-selected', 'transflow-hovering')
+      })
+    }
+    
+    // 편집된 원본 HTML 저장
+    const finalHtml = iframeDoc.documentElement.outerHTML
+    setEditedOriginalHtml(finalHtml)
+    
+    // 원본 편집 모드로 전환
+    setIsSelectionMode(false)
+    setIsPreEditMode(true)
+    
+    // 텍스트 편집 활성화
+    setTimeout(() => {
+      if (iframeDoc.body) {
+        enableTextEditing(iframeDoc)
+      }
+    }, 200)
+  }
+
+  // 원본 편집 후 번역하기
+  const handleTranslateAfterPreEdit = async () => {
+    if (!editedOriginalHtml) {
+      alert('편집된 원본이 없습니다.')
+      return
+    }
+    
+    setIsLoading(true)
+    setError(null)
+    
+    try {
+      // 편집된 원본 HTML 번역
+      const response = await translationApi.translateHtml({
+        html: editedOriginalHtml,
+        targetLang: getDeepLLangCode(targetLang),
+        sourceLang: sourceLang === 'auto' ? undefined : getDeepLLangCode(sourceLang),
+      })
+      
+      if (response.success && response.translatedHtml) {
+        // 번역된 HTML 저장
+        setUrlResult({
+          ...urlResult,
+          translatedHtml: response.translatedHtml,
+        })
+        setEditedHtml(response.translatedHtml)
+        
+        // 비교 모드로 전환
+        setIsPreEditMode(false)
+        setIsComparisonMode(true)
+      } else {
+        setError(response.errorMessage || '번역 중 오류가 발생했습니다.')
+      }
+    } catch (err) {
+      console.error('Translation error:', err)
+      setError(
+        err.response?.data?.errorMessage || 
+        err.message || 
+        '서버와 통신할 수 없습니다.'
+      )
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // 선택된 영역들 번역 (여러 영역을 한 번에) - 이제 사용 안 함
   const handleTranslateSelectedAreas = async () => {
     if (selectedElements.length === 0) {
       alert('번역할 영역을 먼저 선택해주세요.\n\n원하는 영역을 클릭하여 선택하세요. (여러 영역 선택 가능)')
@@ -711,6 +1130,36 @@ function Translation() {
 
   // 저장 함수
   const handleSave = () => {
+    if (isComparisonMode) {
+      // 비교 모드: 번역본만 저장
+      const translatedIframe = translatedIframeRef.current
+      const translatedDoc = translatedIframe?.contentDocument || translatedIframe?.contentWindow?.document
+      
+      if (translatedDoc && urlResult) {
+        const currentHtml = translatedDoc.documentElement.outerHTML
+          .replace(/<style id="transflow-editor-style">[\s\S]*?<\/style>/g, '')
+        
+        setEditedHtml(currentHtml)
+        setUrlResult({
+          ...urlResult,
+          translatedHtml: currentHtml
+        })
+        alert('✅ 번역본이 저장되었습니다!')
+      }
+    } else if (isPreEditMode) {
+      // 원본 편집 모드: 편집된 원본 저장
+      const iframe = iframeRef.current
+      const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document
+      
+      if (iframeDoc) {
+        const currentHtml = iframeDoc.documentElement.outerHTML
+          .replace(/<style id="transflow-editor-style">[\s\S]*?<\/style>/g, '')
+        
+        setEditedOriginalHtml(currentHtml)
+        alert('✅ 편집된 원본이 저장되었습니다!')
+      }
+    } else {
+      // 기존 로직
     const iframe = iframeRef.current
     const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document
     
@@ -724,13 +1173,14 @@ function Translation() {
         translatedHtml: currentHtml
       })
       alert('✅ 저장되었습니다!')
+      }
     }
   }
 
   return (
     <div className="translation-container">
       <header className="translation-header">
-        <h1>TransFlow</h1>
+        <h1>LangBridge</h1>
         <p className="subtitle">웹페이지와 텍스트를 번역하세요</p>
       </header>
 
@@ -812,7 +1262,7 @@ function Translation() {
               borderRadius: '8px',
               border: '1px solid #e0e0e0'
             }}>
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
@@ -842,9 +1292,21 @@ function Translation() {
                       padding: '0.2rem 0.5rem',
                       borderRadius: '12px'
                     }}>
-                      {selectedElements.length}개 선택됨
+                      {selectedElements.length}개
                     </span>
                   )}
+                </div>
+                <div style={{ fontSize: '1.2rem', color: '#ccc' }}>→</div>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  color: isPreEditMode ? '#ff9800' : '#666',
+                  fontWeight: isPreEditMode ? 'bold' : 'normal'
+                }}>
+                  <span style={{ fontSize: '1.2rem' }}>3️⃣</span>
+                  <span>원본 편집</span>
+                  {isPreEditMode && <span style={{ fontSize: '0.8rem' }}>✓</span>}
                 </div>
                 <div style={{ fontSize: '1.2rem', color: '#ccc' }}>→</div>
                 <div style={{ 
@@ -854,8 +1316,21 @@ function Translation() {
                   color: urlResult?.translatedHtml ? '#28a745' : '#666',
                   fontWeight: urlResult?.translatedHtml ? 'bold' : 'normal'
                 }}>
-                  <span style={{ fontSize: '1.2rem' }}>3️⃣</span>
-                  <span>번역 및 편집</span>
+                  <span style={{ fontSize: '1.2rem' }}>4️⃣</span>
+                  <span>번역하기</span>
+                  {urlResult?.translatedHtml && <span style={{ fontSize: '0.8rem' }}>✓</span>}
+                </div>
+                <div style={{ fontSize: '1.2rem', color: '#ccc' }}>→</div>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  color: isComparisonMode ? '#9c27b0' : '#666',
+                  fontWeight: isComparisonMode ? 'bold' : 'normal'
+                }}>
+                  <span style={{ fontSize: '1.2rem' }}>5️⃣</span>
+                  <span>비교 편집</span>
+                  {isComparisonMode && <span style={{ fontSize: '0.8rem' }}>✓</span>}
                 </div>
               </div>
             </div>
@@ -895,17 +1370,17 @@ function Translation() {
                 </p>
                 {selectedElements.length > 0 && (
                   <button 
-                    onClick={handleTranslateSelectedAreas}
+                    onClick={handleStartPreEdit}
                     disabled={isLoading}
                     className="translate-button"
                     style={{ 
-                      backgroundColor: '#28a745', 
+                      backgroundColor: '#667eea', 
                       color: 'white',
                       fontSize: '1.1rem',
                       padding: '0.75rem 1.5rem'
                     }}
                   >
-                    {isLoading ? '번역 중...' : `✅ 선택한 ${selectedElements.length}개 영역 번역하기`}
+                    {isLoading ? '처리 중...' : `✏️ 선택한 ${selectedElements.length}개 영역 원본 편집하기`}
                   </button>
                 )}
               </div>
@@ -919,7 +1394,344 @@ function Translation() {
               </div>
             )}
 
-            {urlResult && !isLoading && (
+            {/* 원본 편집 모드 */}
+            {isPreEditMode && editedOriginalHtml && (
+              <div style={{ marginTop: '1rem' }}>
+                <div style={{
+                  padding: '1rem',
+                  backgroundColor: '#fff3e0',
+                  borderRadius: '8px',
+                  border: '2px solid #ff9800',
+                  marginBottom: '1rem'
+                }}>
+                  <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold', color: '#e65100' }}>
+                    ✏️ 원본 편집 모드
+                  </p>
+                  <p style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', color: '#555' }}>
+                    텍스트를 클릭하여 편집하세요. 편집이 완료되면 번역하기 버튼을 클릭하세요.
+                  </p>
+                  <button 
+                    onClick={handleTranslateAfterPreEdit}
+                    disabled={isLoading}
+                    className="translate-button"
+                    style={{ 
+                      backgroundColor: '#28a745', 
+                      color: 'white',
+                      fontSize: '1.1rem',
+                      padding: '0.75rem 1.5rem'
+                    }}
+                  >
+                    {isLoading ? '번역 중...' : '🌐 번역하기'}
+                  </button>
+                </div>
+                <div className="html-result" style={{ width: '100%' }}>
+                  <div style={{
+                    padding: '1rem 1.5rem',
+                    backgroundColor: '#f8f9fa',
+                    border: '2px solid #e0e0e0',
+                    borderRadius: '8px 8px 0 0',
+                    borderBottom: 'none'
+                  }}>
+                    <h3 style={{ margin: 0, fontSize: '1.3rem', color: '#333' }}>
+                      📝 편집 중인 원본 페이지
+                    </h3>
+                  </div>
+                  <div style={{
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: '#fff3e0',
+                    border: '1px solid #ff9800',
+                    borderTop: 'none',
+                    fontSize: '0.9rem',
+                    color: '#e65100'
+                  }}>
+                    ✏️ 텍스트를 클릭하여 편집하세요
+                  </div>
+                  <div style={{
+                    width: '100%',
+                    height: '90vh',
+                    minHeight: '800px',
+                    border: '2px solid #ff9800',
+                    borderRadius: '0 0 8px 8px',
+                    overflow: 'hidden',
+                    backgroundColor: 'white'
+                  }}>
+                    <iframe
+                      ref={iframeRef}
+                      title="Original Page for Editing"
+                      style={{ width: '100%', height: '100%', border: 'none' }}
+                      sandbox="allow-same-origin allow-scripts"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 비교 편집 모드 (원본과 번역본 나란히) */}
+            {isComparisonMode && urlResult?.translatedHtml && (
+              <div style={{ marginTop: '1rem' }}>
+                {fullscreenMode ? (
+                  // 전체화면 모드
+                  <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'white',
+                    zIndex: 9999,
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}>
+                    <div style={{
+                      padding: '1rem 1.5rem',
+                      backgroundColor: '#f8f9fa',
+                      borderBottom: '2px solid #e0e0e0',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}>
+                      <h3 style={{ margin: 0, fontSize: '1.3rem', color: '#333' }}>
+                        {fullscreenMode === 'original' ? '📄 원본 페이지 (전체화면)' : '✨ 번역된 페이지 (전체화면)'}
+                      </h3>
+                      <button
+                        onClick={() => setFullscreenMode(null)}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          fontSize: '0.9rem',
+                          fontWeight: '600',
+                          backgroundColor: '#666',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ✕ 전체화면 종료
+                      </button>
+                    </div>
+                    <div style={{
+                      flex: 1,
+                      overflow: 'hidden',
+                      backgroundColor: 'white'
+                    }}>
+                      <iframe
+                        ref={fullscreenMode === 'original' ? originalIframeRef : translatedIframeRef}
+                        title={fullscreenMode === 'original' ? 'Original Page Fullscreen' : 'Translated Page Fullscreen'}
+                        style={{ width: '100%', height: '100%', border: 'none' }}
+                        sandbox="allow-same-origin allow-scripts"
+                        key={fullscreenMode} // key를 추가하여 전체화면 모드 변경 시 iframe 재렌더링
+                        onLoad={() => {
+                          // 전체화면 모드에서도 편집 기능 활성화
+                          const iframe = fullscreenMode === 'original' ? originalIframeRef.current : translatedIframeRef.current
+                          const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document
+                          if (iframeDoc && iframeDoc.body) {
+                            setTimeout(() => {
+                              enableTextEditing(iframeDoc)
+                            }, 100)
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  // 일반 비교 모드
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '1rem',
+                    height: 'calc(100vh - 150px)',
+                    minHeight: '900px'
+                  }}>
+                    {/* 원본 페이지 */}
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <div style={{
+                        padding: '1rem 1.5rem',
+                        backgroundColor: '#f8f9fa',
+                        border: '2px solid #e0e0e0',
+                        borderRadius: '8px 8px 0 0',
+                        borderBottom: 'none',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <h3 style={{ margin: 0, fontSize: '1.3rem', color: '#333' }}>
+                          📄 원본 페이지
+                        </h3>
+                        <button
+                          onClick={() => setFullscreenMode('original')}
+                          style={{
+                            padding: '0.4rem 0.8rem',
+                            fontSize: '0.85rem',
+                            backgroundColor: '#2196f3',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer'
+                          }}
+                          title="전체화면"
+                        >
+                          ⛶ 전체화면
+                        </button>
+                      </div>
+                    <div style={{
+                      padding: '0.75rem 1.5rem',
+                      backgroundColor: '#e3f2fd',
+                      border: '1px solid #90caf9',
+                      borderTop: 'none',
+                      fontSize: '0.9rem',
+                      color: '#1976d2'
+                    }}>
+                      ✏️ 텍스트를 클릭하여 편집하세요
+                    </div>
+                    <div style={{
+                      flex: 1,
+                      border: '2px solid #2196f3',
+                      borderRadius: '0 0 8px 8px',
+                      overflow: 'hidden',
+                      backgroundColor: 'white'
+                    }}>
+                      <iframe
+                        ref={originalIframeRef}
+                        title="Original Page"
+                        style={{ width: '100%', height: '100%', border: 'none' }}
+                        sandbox="allow-same-origin allow-scripts"
+                      />
+                    </div>
+                  </div>
+
+                    {/* 번역본 페이지 */}
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <div style={{
+                        padding: '1rem 1.5rem',
+                        backgroundColor: '#f8f9fa',
+                        border: '2px solid #e0e0e0',
+                        borderRadius: '8px 8px 0 0',
+                        borderBottom: 'none',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div>
+                          <h3 style={{ margin: 0, fontSize: '1.3rem', color: '#333' }}>
+                            ✨ 번역된 페이지
+                          </h3>
+                          {urlResult.sourceLang && urlResult.targetLang && (
+                            <span style={{ fontSize: '0.9rem', color: '#666' }}>
+                              {urlResult.sourceLang} → {urlResult.targetLang}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setFullscreenMode('translated')}
+                          style={{
+                            padding: '0.4rem 0.8rem',
+                            fontSize: '0.85rem',
+                            backgroundColor: '#4caf50',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer'
+                          }}
+                          title="전체화면"
+                        >
+                          ⛶ 전체화면
+                        </button>
+                      </div>
+                    <div style={{
+                      padding: '0.75rem 1.5rem',
+                      backgroundColor: '#e8f5e9',
+                      border: '1px solid #81c784',
+                      borderTop: 'none',
+                      fontSize: '0.9rem',
+                      color: '#2e7d32'
+                    }}>
+                      ✏️ 텍스트를 클릭하여 편집하세요
+                    </div>
+                    <div style={{
+                      flex: 1,
+                      border: '2px solid #4caf50',
+                      borderRadius: '0 0 8px 8px',
+                      overflow: 'hidden',
+                      backgroundColor: 'white'
+                    }}>
+                      <iframe
+                        ref={translatedIframeRef}
+                        title="Translated Page"
+                        style={{ width: '100%', height: '100%', border: 'none' }}
+                        sandbox="allow-same-origin allow-scripts"
+                      />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!fullscreenMode && (
+                  <div style={{
+                    marginTop: '1rem',
+                    display: 'flex',
+                    gap: '1rem',
+                    justifyContent: 'center'
+                  }}>
+                    <button
+                    onClick={handleSave}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      backgroundColor: '#28a745',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    💾 저장
+                  </button>
+                  <button
+                    onClick={() => {
+                      const translatedIframe = translatedIframeRef.current
+                      const translatedDoc = translatedIframe?.contentDocument || translatedIframe?.contentWindow?.document
+                      if (translatedDoc && urlResult) {
+                        let htmlContent = translatedDoc.documentElement.outerHTML
+                          .replace(/<style id="transflow-editor-style">[\s\S]*?<\/style>/g, '')
+                        if (urlResult.css) {
+                          const cssTag = `<style id="transflow-css">\n${urlResult.css}\n</style>`
+                          if (htmlContent.includes('</head>')) {
+                            htmlContent = htmlContent.replace('</head>', `${cssTag}\n</head>`)
+                          } else if (htmlContent.includes('<html')) {
+                            htmlContent = htmlContent.replace('<html', `${cssTag}\n<html`)
+                          }
+                        }
+                        const blob = new Blob([htmlContent], { type: 'text/html' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `translated-${new Date().getTime()}.html`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                        URL.revokeObjectURL(url)
+                      }
+                    }}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      backgroundColor: '#667eea',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    📥 다운로드
+                  </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 기존 렌더링 (영역 선택 모드 또는 기타) */}
+            {urlResult && !isLoading && !isPreEditMode && !isComparisonMode && (
               <div className="url-result">
                 {/* 원본 HTML이 있으면 iframe으로 표시 (영역 선택 모드 또는 번역 완료 후) */}
                 {urlResult.originalHtml ? (
@@ -1066,8 +1878,8 @@ function Translation() {
                     
                     <div style={{
                       width: '100%',
-                      height: '85vh',
-                      minHeight: '700px',
+                      height: '90vh',
+                      minHeight: '800px',
                       border: '2px solid #667eea',
                       borderRadius: '0 0 8px 8px',
                       overflow: 'hidden',

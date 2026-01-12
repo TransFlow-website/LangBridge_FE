@@ -7,7 +7,7 @@ function Home() {
   return (
     <div className="home-container">
       <div className="home-content">
-        <h1>TransFlow</h1>
+        <h1>LangBridge</h1>
         <p className="subtitle">빠르고 정확한 번역 서비스</p>
         
         <div className="features">
