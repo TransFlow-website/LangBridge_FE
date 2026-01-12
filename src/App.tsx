@@ -7,8 +7,7 @@ import Translation from './pages/Translation';
 import WebPageEditor from './pages/WebPageEditor';
 import './App.css';
 
-// 더미 페이지 컴포넌트들 (나중에 실제 페이지로 교체)
-const Dashboard = () => <div className="p-8"><h1 className="text-2xl font-bold">대시보드</h1></div>;
+import Dashboard from './pages/Dashboard';
 const TranslationsPending = () => <div className="p-8"><h1 className="text-2xl font-bold">번역 대기 문서</h1></div>;
 const TranslationsWorking = () => <div className="p-8"><h1 className="text-2xl font-bold">내가 작업 중인 문서</h1></div>;
 const TranslationsFavorites = () => <div className="p-8"><h1 className="text-2xl font-bold">찜한 문서</h1></div>;
