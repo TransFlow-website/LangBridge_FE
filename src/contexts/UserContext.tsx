@@ -72,28 +72,27 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
     if (token) {
+      console.log('🔑 OAuth 콜백에서 토큰 발견, 저장 중...');
       authApi.setToken(token);
       // URL에서 토큰 제거
       window.history.replaceState({}, document.title, window.location.pathname);
+      // 토큰 저장 후 즉시 사용자 정보 로드
+      refreshUser().catch((err) => {
+        console.error('사용자 정보 로드 실패:', err);
+      });
+      return;
     }
 
     const existingToken = authApi.getToken();
     if (!existingToken) {
-      // 개발 환경: 더미 사용자 데이터 설정 (실제 프로덕션에서는 제거)
-      if (import.meta.env.DEV) {
-        const dummyUser: User = {
-          id: 1,
-          email: 'admin@example.com',
-          name: '관리자',
-          roleLevel: 1, // SUPER_ADMIN
-          role: roleLevelToRole(1),
-        };
-        setUser(dummyUser);
-        setLoading(false);
-        return;
-      }
+      // 토큰이 없으면 사용자 정보 없음
+      console.log('ℹ️ 토큰이 없습니다.');
+      setUser(null);
+      setLoading(false);
+      return;
     }
 
+    console.log('🔄 기존 토큰으로 사용자 정보 로드 중...');
     refreshUser();
   }, []);
 

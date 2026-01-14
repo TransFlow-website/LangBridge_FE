@@ -793,27 +793,10 @@ const Step3PreEdit: React.FC<{
                   onHtmlChange(updatedHtml);
                 }
                 
-                // 백스페이스 키 처리
+                // ⭐ 백스페이스 키 처리 (브라우저 기본 동작 허용)
                 if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                  const activeElement = iframeDoc.activeElement;
-                  if (activeElement && (activeElement as HTMLElement).isContentEditable) {
-                    const scrollTop = iframeDoc.documentElement.scrollTop || iframeDoc.body.scrollTop;
-                    const scrollLeft = iframeDoc.documentElement.scrollLeft || iframeDoc.body.scrollLeft;
-                    
-                    setTimeout(() => {
-                      if (iframeDoc.documentElement) {
-                        iframeDoc.documentElement.scrollTop = scrollTop;
-                        iframeDoc.documentElement.scrollLeft = scrollLeft;
-                      }
-                      if (iframeDoc.body) {
-                        iframeDoc.body.scrollTop = scrollTop;
-                        iframeDoc.body.scrollLeft = scrollLeft;
-                      }
-                      if (activeElement && (activeElement as HTMLElement).isContentEditable) {
-                        (activeElement as HTMLElement).focus();
-                      }
-                    }, 0);
-                  }
+                  // 브라우저가 알아서 처리하게 놔둠 (포커스 유지)
+                  console.log('⌫ 백스페이스 (STEP 3 텍스트 편집)');
                 }
               };
               
@@ -1515,7 +1498,7 @@ const Step4Translation: React.FC<{
   );
 };
 
-// STEP 5: 원문/번역문 병렬 편집
+// STEP 5: 원문/편집본 병렬 편집 (NewTranslation 전용)
 const Step5ParallelEdit: React.FC<{
   crawledHtml: string; // STEP 1에서 크롤링한 전체 원문
   selectedHtml: string; // STEP 2/3에서 선택한 영역
@@ -1597,12 +1580,12 @@ const Step5ParallelEdit: React.FC<{
     }
   }, [selectedHtml, collapsedPanels, fullscreenPanel]);
 
-  // 번역문 iframe 초기 렌더링
+  // 편집본 iframe 초기 렌더링 (NewTranslation 전용)
   useEffect(() => {
     const iframe = translatedIframeRef.current;
     if (!iframe || !translatedHtml) return;
 
-    console.log('📝 번역문 iframe 렌더링 시작, isTranslatedInitialized:', isTranslatedInitialized);
+    console.log('📝 [NewTranslation Step5] 편집본 iframe 렌더링 시작, isTranslatedInitialized:', isTranslatedInitialized);
     const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
 
     if (iframeDoc) {
@@ -1610,7 +1593,7 @@ const Step5ParallelEdit: React.FC<{
         iframeDoc.open();
         iframeDoc.write(translatedHtml);
         iframeDoc.close();
-        console.log('✅ 번역문 iframe 렌더링 완료');
+        console.log('✅ [NewTranslation Step5] 편집본 iframe 렌더링 완료');
       } catch (error) {
         console.warn('translated iframe write error (ignored):', error);
       }
@@ -1633,7 +1616,7 @@ const Step5ParallelEdit: React.FC<{
     }
   }, [translatedHtml, collapsedPanels, fullscreenPanel, isTranslatedInitialized]);
 
-  // 번역문 편집 모드 처리
+  // 편집본 편집 모드 처리 (NewTranslation 전용)
   useEffect(() => {
     if (!isTranslatedInitialized || !translatedIframeRef.current) return;
 
@@ -1641,22 +1624,18 @@ const Step5ParallelEdit: React.FC<{
     const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!iframeDoc) return;
 
-    console.log('🎨 STEP 5 번역문 편집 모드:', mode);
+    console.log('🎨 [NewTranslation Step5] 편집본 편집 모드:', mode);
 
     // 기존 스타일 제거
     const existingStyle = iframeDoc.querySelector('#editor-styles');
     if (existingStyle) existingStyle.remove();
 
-    // 기존 이벤트 리스너 제거 (새로 추가할 예정)
-    const allElements = iframeDoc.querySelectorAll('*');
-    allElements.forEach(el => {
-      const clone = el.cloneNode(true);
-      el.parentNode?.replaceChild(clone, el);
-    });
+    // ⚠️ DOM 노드 복제-교체는 하지 않음 (포커스/입력 흐름 유지)
+    // Step 3처럼 스타일과 contentEditable만 변경
 
     if (mode === 'text') {
       // 텍스트 편집 모드
-      console.log('📝 텍스트 편집 모드 활성화');
+      console.log('📝 [NewTranslation Step5] 텍스트 편집 모드 활성화');
 
       // contentEditable 설정
       const textElements = iframeDoc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, span, a, li, td, th, label, button');
@@ -1671,8 +1650,8 @@ const Step5ParallelEdit: React.FC<{
         (el as HTMLElement).style.cursor = 'default';
       });
 
-      // Cmd+Z (Mac) / Ctrl+Z (Windows) 지원
-      const handleKeydown = (e: KeyboardEvent) => {
+      // ⭐ Step 3와 동일한 방식으로 키보드 이벤트 처리
+      const handleKeyDown = (e: KeyboardEvent) => {
         // Cmd+Z (Mac) 또는 Ctrl+Z (Windows) - Undo
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
@@ -1680,7 +1659,7 @@ const Step5ParallelEdit: React.FC<{
           iframeDoc.execCommand('undo', false);
           const updatedHtml = iframeDoc.documentElement.outerHTML;
           onTranslatedChange(updatedHtml);
-          console.log('↩️ Undo (STEP 5)');
+          console.log('↩️ Undo (STEP 5 텍스트 편집)');
         }
         // Cmd+Shift+Z (Mac) 또는 Ctrl+Y (Windows) - Redo
         else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
@@ -1689,21 +1668,19 @@ const Step5ParallelEdit: React.FC<{
           iframeDoc.execCommand('redo', false);
           const updatedHtml = iframeDoc.documentElement.outerHTML;
           onTranslatedChange(updatedHtml);
-          console.log('↪️ Redo (STEP 5)');
+          console.log('↪️ Redo (STEP 5 텍스트 편집)');
+        }
+        
+        // ⭐ 백스페이스 키 처리 (브라우저 기본 동작 허용) - Step 3와 동일
+        if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          // 브라우저가 알아서 처리하게 놔둠
+          console.log('⌫ 백스페이스 (STEP 5 텍스트 편집)');
         }
       };
-      // capture 단계에서 이벤트 잡기
-      iframeDoc.addEventListener('keydown', handleKeydown, true);
       
-      // 부모 window에서도 이벤트 잡기 (맥 시스템 단축키 방지)
-      window.addEventListener('keydown', (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'y')) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
-      }, true);
-
-      // 변경 사항 추적
+      iframeDoc.addEventListener('keydown', handleKeyDown, true);
+      
+      // 변경 사항 추적 - Step 3와 동일
       const handleInput = () => {
         const updatedHtml = iframeDoc.documentElement.outerHTML;
         onTranslatedChange(updatedHtml);
@@ -1712,7 +1689,7 @@ const Step5ParallelEdit: React.FC<{
 
     } else if (mode === 'component') {
       // 컴포넌트 편집 모드
-      console.log('🧩 컴포넌트 편집 모드 활성화');
+      console.log('🧩 [NewTranslation Step5] 컴포넌트 편집 모드 활성화');
 
       // contentEditable 비활성화
       const allEditableElements = iframeDoc.querySelectorAll('[contenteditable]');
@@ -1885,9 +1862,9 @@ const Step5ParallelEdit: React.FC<{
     }
 
     return () => {
-      // 클린업은 다음 useEffect에서 자동으로 처리됨 (replaceChild로 인해)
+      // 클린업: 이벤트 리스너는 모드 변경 시 제거됨
     };
-  }, [mode, isTranslatedInitialized, onTranslatedChange]);
+  }, [mode, isTranslatedInitialized]); // ⭐ Step 3처럼 onTranslatedChange 제거
 
   // 컴포넌트 삭제
   const handleDelete = () => {
@@ -1919,13 +1896,17 @@ const Step5ParallelEdit: React.FC<{
     setSelectedElements([]);
 
     console.log('✅ 삭제 완료 (STEP 5)');
+    
+    // ⭐ 삭제 후 컴포넌트 편집 모드 재활성화 (이벤트 리스너 재등록)
+    setMode('text');
+    setTimeout(() => setMode('component'), 0);
   };
 
   // 패널 정의
   const panels = [
     { id: 'crawled', title: '크롤링 원본', ref: crawledIframeRef, editable: false },
     { id: 'selected', title: '선택한 영역', ref: selectedIframeRef, editable: false },
-    { id: 'translated', title: '번역문', ref: translatedIframeRef, editable: true },
+    { id: 'translated', title: '편집본', ref: translatedIframeRef, editable: true },
   ];
 
   const visiblePanels = panels.filter(p => !collapsedPanels.has(p.id));
@@ -2030,7 +2011,7 @@ const Step5ParallelEdit: React.FC<{
                     flexDirection: 'column',
                   }}
                 >
-                  {/* 번역문 패널에만 편집 툴바 추가 */}
+                  {/* 편집본 패널에만 편집 툴바 추가 */}
                   {panel.id === 'translated' && (
                     <>
                       <div

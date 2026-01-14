@@ -12,7 +12,7 @@ export const authApi = {
       throw new Error('No token found');
     }
 
-    const response = await apiClient.get('/auth/current', {
+    const response = await apiClient.get('/auth/me', {
       headers: {
         Authorization: `Bearer ${token}`,
       },

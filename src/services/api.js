@@ -14,20 +14,34 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
-    console.log('🔑 API 요청:', {
-      url: config.url,
-      method: config.method,
-      hasToken: !!token,
-      token: token ? `${token.substring(0, 20)}...` : 'null'
-    });
+    
+    // 토큰 디코딩하여 roleLevel 확인 (디버깅용)
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        console.log('🔑 API 요청:', {
+          url: config.url,
+          method: config.method,
+          hasToken: true,
+          userId: payload.userId,
+          roleLevel: payload.roleLevel,
+          email: payload.email,
+        });
+      } catch (e) {
+        console.log('🔑 API 요청:', {
+          url: config.url,
+          method: config.method,
+          hasToken: true,
+          token: `${token.substring(0, 20)}...`,
+        });
+      }
+    } else {
+      console.warn('⚠️ localStorage에 token이 없습니다!');
+    }
     
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
       console.log('✅ Authorization 헤더 추가됨');
-    } else {
-      console.warn('⚠️ localStorage에 token이 없습니다!');
-      console.warn('💡 해결 방법: 로그인을 먼저 하거나, 브라우저 콘솔에서 다음 명령 실행:');
-      console.warn('   localStorage.setItem("token", "YOUR_JWT_TOKEN")');
     }
     return config;
   },

@@ -13,7 +13,7 @@ import NewTranslation from './pages/NewTranslation';
 import TranslationsPending from './pages/TranslationsPending';
 import Documents from './pages/Documents';
 import TranslationWork from './pages/TranslationWork';
-const TranslationsWorking = () => <div className="p-8"><h1 className="text-2xl font-bold">내가 작업 중인 문서</h1></div>;
+import TranslationsWorking from './pages/TranslationsWorking';
 const TranslationsFavorites = () => <div className="p-8"><h1 className="text-2xl font-bold">찜한 문서</h1></div>;
 const DocumentsCategories = () => <div className="p-8"><h1 className="text-2xl font-bold">카테고리별 문서</h1></div>;
 const DocumentsStatus = () => <div className="p-8"><h1 className="text-2xl font-bold">상태별 문서</h1></div>;
@@ -28,30 +28,40 @@ function App() {
     <UserProvider>
       <SidebarProvider>
         <Router>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/translate" element={<Translation />} />
-              <Route path="/editor" element={<WebPageEditor />} />
-              
-              {/* 사이드바 메뉴 라우트 */}
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/translation-guide" element={<TranslationGuide />} />
-              <Route path="/translations/pending" element={<TranslationsPending />} />
-              <Route path="/translations/:id/work" element={<TranslationWork />} />
-              <Route path="/translations/working" element={<TranslationsWorking />} />
-              <Route path="/translations/favorites" element={<TranslationsFavorites />} />
-              <Route path="/documents" element={<Documents />} />
-              <Route path="/documents/categories" element={<DocumentsCategories />} />
-              <Route path="/documents/status" element={<DocumentsStatus />} />
-              <Route path="/translations/new" element={<NewTranslation />} />
-              <Route path="/reviews" element={<Reviews />} />
-              <Route path="/glossary" element={<Glossary />} />
-              <Route path="/glossary/manage" element={<GlossaryManage />} />
-              <Route path="/activity" element={<Activity />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
-          </Layout>
+          <Routes>
+            {/* Public 영역: Layout 없이 렌더링 */}
+            <Route path="/" element={<Home />} />
+            
+            {/* App 영역: Layout 포함 */}
+            <Route
+              path="/*"
+              element={
+                <Layout>
+                  <Routes>
+                    <Route path="/translate" element={<Translation />} />
+                    <Route path="/editor" element={<WebPageEditor />} />
+                    
+                    {/* 사이드바 메뉴 라우트 */}
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/translation-guide" element={<TranslationGuide />} />
+                    <Route path="/translations/pending" element={<TranslationsPending />} />
+                    <Route path="/translations/:id/work" element={<TranslationWork />} />
+                    <Route path="/translations/working" element={<TranslationsWorking />} />
+                    <Route path="/translations/favorites" element={<TranslationsFavorites />} />
+                    <Route path="/documents" element={<Documents />} />
+                    <Route path="/documents/categories" element={<DocumentsCategories />} />
+                    <Route path="/documents/status" element={<DocumentsStatus />} />
+                    <Route path="/translations/new" element={<NewTranslation />} />
+                    <Route path="/reviews" element={<Reviews />} />
+                    <Route path="/glossary" element={<Glossary />} />
+                    <Route path="/glossary/manage" element={<GlossaryManage />} />
+                    <Route path="/activity" element={<Activity />} />
+                    <Route path="/settings" element={<Settings />} />
+                  </Routes>
+                </Layout>
+              }
+            />
+          </Routes>
         </Router>
       </SidebarProvider>
     </UserProvider>

@@ -12,27 +12,63 @@ export interface Paragraph {
 
 /**
  * HTML 문자열에서 문단 요소들을 추출하고 ID를 부여
+ * 원본 HTML 구조와 모든 요소(이미지, 레이아웃 등)를 보존
+ * 
+ * @param html - HTML 문자열
+ * @param containerId - 컨테이너 ID (선택적, 고유 ID 생성용)
+ * @returns 문단 ID가 부여된 HTML 문자열
+ * 
+ * ⚠️ 중요: 원문과 AI 초벌 번역은 동일한 문단 구조를 가지므로,
+ * data-paragraph-index만으로 1:1 매칭이 가능합니다.
  */
-export function extractParagraphs(html: string, containerId: string): string {
+export function extractParagraphs(html: string, containerId: string = 'content'): string {
+  // 빈 HTML이면 그대로 반환
+  if (!html || html.trim().length === 0) {
+    return html;
+  }
+
   const parser = new DOMParser();
+  
+  // HTML을 문서로 파싱
   const doc = parser.parseFromString(html, 'text/html');
   const body = doc.body;
 
+  // 이미 문단 index가 있는지 확인
+  const existingIndexes = body.querySelectorAll('[data-paragraph-index]');
+  if (existingIndexes.length > 0) {
+    // 이미 index가 있으면 그대로 반환 (중복 처리 방지)
+    console.log(`⏭️ 이미 문단 ID가 있음 (${existingIndexes.length}개), 처리 생략`);
+    return html;
+  }
+
   // 문단 요소 선택 (p, h1-h6, div, li 등)
-  const paragraphSelectors = 'p, h1, h2, h3, h4, h5, h6, div, li, blockquote, article, section';
+  // 이미지나 다른 요소를 포함하는 컨테이너도 포함
+  const paragraphSelectors = 'p, h1, h2, h3, h4, h5, h6, div, li, blockquote, article, section, figure, figcaption';
   const elements = body.querySelectorAll(paragraphSelectors);
 
-  elements.forEach((el, index) => {
-    // 텍스트가 있는 요소만 문단으로 간주
+  let paragraphIndex = 0;
+  elements.forEach((el) => {
+    // 텍스트가 있거나 이미지/다른 콘텐츠가 있는 요소를 문단으로 간주
     const text = el.textContent?.trim();
-    if (text && text.length > 0) {
-      const paragraphId = `para-${containerId}-${index}`;
+    const hasImages = el.querySelectorAll('img').length > 0;
+    const hasContent = text && text.length > 0;
+    
+    if (hasContent || hasImages) {
+      // data-paragraph-id는 디버깅용 (선택적)
+      const paragraphId = `para-${containerId}-${paragraphIndex}`;
       (el as HTMLElement).setAttribute('data-paragraph-id', paragraphId);
-      (el as HTMLElement).setAttribute('data-paragraph-index', index.toString());
+      
+      // ⭐ data-paragraph-index가 핵심: 원문과 AI 초벌 번역 간 매칭에 사용
+      (el as HTMLElement).setAttribute('data-paragraph-index', paragraphIndex.toString());
+      
+      paragraphIndex++;
     }
   });
 
-  return body.innerHTML;
+  console.log(`✅ 문단 ID 추가 완료: ${paragraphIndex}개 문단 (containerId: ${containerId})`);
+
+  // ⭐ 전체 HTML 문서를 반환 (head 태그, CSS 등 모두 보존)
+  return doc.documentElement.outerHTML;
 }
 
 /**
@@ -117,14 +153,15 @@ export function getParagraphAtScrollPosition(container: HTMLElement, scrollTop: 
  */
 export function highlightParagraph(element: HTMLElement, isHighlighted: boolean) {
   if (isHighlighted) {
-    element.style.backgroundColor = 'rgba(192, 192, 192, 0.3)';
+    element.style.backgroundColor = 'rgba(192, 192, 192, 0.2)';
     element.style.transition = 'background-color 150ms';
-    element.style.borderLeft = '3px solid #808080';
-    element.style.paddingLeft = '8px';
+    // 경계선 제거 - 배경색만으로 하이라이트
+    // element.style.borderLeft = '3px solid #808080';
+    // element.style.paddingLeft = '8px';
   } else {
     element.style.backgroundColor = '';
-    element.style.borderLeft = '';
-    element.style.paddingLeft = '';
+    // element.style.borderLeft = '';
+    // element.style.paddingLeft = '';
   }
 }
 

@@ -13,6 +13,7 @@ import {
   ChevronUp,
   Menu,
   X,
+  LogOut,
 } from 'lucide-react';
 import { sidebarMenu, MenuItem, SubMenuItem } from '../constants/sidebarMenu';
 import { useUser } from '../contexts/UserContext';
@@ -43,7 +44,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string; size?: n
 export const Sidebar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user } = useUser();
+  const { user, logout } = useUser();
   const { isCollapsed, setIsCollapsed } = useSidebar();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
@@ -474,6 +475,46 @@ export const Sidebar: React.FC = () => {
           <div className="space-y-2">
             {bottomMenuItems.map(renderMenuItem)}
           </div>
+          
+          {/* 로그아웃 버튼 */}
+          {user && (
+            <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: `1px solid ${colors.border}` }}>
+              <button
+                onClick={async () => {
+                  if (window.confirm('로그아웃하시겠습니까?')) {
+                    await logout();
+                    navigate('/', { replace: true });
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: isCollapsed && !isMobileOpen ? '0' : '8px',
+                  justifyContent: isCollapsed && !isMobileOpen ? 'center' : 'flex-start',
+                  padding: spacing.menuItemPadding,
+                  borderRadius: sizes.borderRadius,
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: colors.primaryText,
+                  fontSize: typography.fontSize.sidebarMenu,
+                  fontWeight: typography.fontWeight.menu,
+                  cursor: 'pointer',
+                  transition: `background-color ${transitions.duration} ${transitions.easing}`,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = menuStates.hover.background;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+                title={isCollapsed && !isMobileOpen ? '로그아웃' : undefined}
+              >
+                <LogOut size={16} strokeWidth={1.75} />
+                {(!isCollapsed || isMobileOpen) && <span>로그아웃</span>}
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 

@@ -90,6 +90,14 @@ export const documentApi = {
   },
 
   /**
+   * 문서 상태만 업데이트
+   */
+  updateDocumentStatus: async (id: number, status: string): Promise<DocumentResponse> => {
+    const response = await apiClient.put<DocumentResponse>(`/documents/${id}`, { status });
+    return response.data;
+  },
+
+  /**
    * 문서 버전 생성
    */
   createDocumentVersion: async (
