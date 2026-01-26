@@ -13,5 +13,7 @@ export interface DashboardData {
   workingDocuments: Document[]; // 작업 중인 문서
   reviewPendingCount?: number; // 검토 대기 개수 (관리자)
   latestReviewDocument?: Document; // 최신 검토 문서 (관리자)
+  approvedDocuments?: Document[]; // 승인된 문서
+  rejectedDocuments?: Document[]; // 반려된 문서
 }
 
