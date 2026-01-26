@@ -515,10 +515,20 @@ export default function TranslationWork() {
         }
       }, true);
 
-      // 변경 사항 추적
+      // ⚡ 최적화: input 이벤트 디바운스 (메모리 사용 감소)
+      let inputTimeoutId: NodeJS.Timeout | null = null;
       const handleInput = () => {
-        const updatedHtml = iframeDoc.documentElement.outerHTML;
-        setSavedTranslationHtml(updatedHtml);
+        // 기존 타이머 취소
+        if (inputTimeoutId) {
+          clearTimeout(inputTimeoutId);
+        }
+        
+        // 500ms 후에 HTML 추출 (디바운스)
+        inputTimeoutId = setTimeout(() => {
+          const updatedHtml = iframeDoc.documentElement.outerHTML;
+          setSavedTranslationHtml(updatedHtml);
+          inputTimeoutId = null;
+        }, 500);
       };
       iframeDoc.body.addEventListener('input', handleInput);
 

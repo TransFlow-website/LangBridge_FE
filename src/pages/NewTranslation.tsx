@@ -260,55 +260,37 @@ const Step2AreaSelection: React.FC<{
       highlightedElement = null;
     };
     
-    // 모든 요소에 직접 이벤트 리스너 추가 (Translation.jsx와 동일)
-    const attachListenersToAllElements = () => {
-      const allElements = iframeDoc.querySelectorAll('*');
-      
-      allElements.forEach((el) => {
-        if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'NOSCRIPT') return;
-        if (el === iframeDoc.body || el === iframeDoc.documentElement) return;
-        
-        const element = el as HTMLElement;
-        // 기존 리스너 제거 후 새로 추가
-        element.removeEventListener('mouseover', handleMouseOver as EventListener);
-        element.removeEventListener('mouseout', handleMouseOut as EventListener);
-        element.removeEventListener('click', handleClick as EventListener);
-        
-        element.addEventListener('mouseover', handleMouseOver as EventListener, true);
-        element.addEventListener('mouseout', handleMouseOut as EventListener, true);
-        element.addEventListener('click', handleClick as EventListener, true);
-      });
-    };
-    
-    // 즉시 실행 (Translation.jsx와 동일)
-    attachListenersToAllElements();
-    
-    // body에도 추가
+    // ⚡ 최적화: 이벤트 위임 사용 (body에만 리스너 추가)
+    // 모든 요소에 개별 리스너를 추가하는 대신 body에서 이벤트 위임 사용
     if (iframeDoc.body) {
-      iframeDoc.body.addEventListener('mouseover', handleMouseOver as EventListener, true);
-      iframeDoc.body.addEventListener('mouseout', handleMouseOut as EventListener, true);
-      iframeDoc.body.addEventListener('click', handleClick as EventListener, true);
+      // mouseover 이벤트 위임
+      iframeDoc.body.addEventListener('mouseover', (e) => {
+        const target = e.target as HTMLElement;
+        if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) return;
+        if (target.tagName === 'SCRIPT' || target.tagName === 'STYLE' || target.tagName === 'NOSCRIPT') return;
+        handleMouseOver(e);
+      }, true);
+      
+      // mouseout 이벤트 위임
+      iframeDoc.body.addEventListener('mouseout', (e) => {
+        const target = e.target as HTMLElement;
+        if (target && !target.classList.contains('transflow-selected')) {
+          handleMouseOut(e);
+        }
+      }, true);
+      
+      // click 이벤트 위임
+      iframeDoc.body.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) return;
+        if (target.tagName === 'SCRIPT' || target.tagName === 'STYLE' || target.tagName === 'NOSCRIPT') return;
+        handleClick(e);
+      }, true);
+      
+      console.log('✅ 이벤트 위임으로 메모리 최적화 완료 (body에만 리스너 추가)');
     }
     
-    // 새로 추가되는 요소에도 리스너 추가 (MutationObserver 사용)
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1) { // Element node
-            const element = node as HTMLElement;
-            if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE' || element.tagName === 'NOSCRIPT') return;
-            element.addEventListener('mouseover', handleMouseOver as EventListener, true);
-            element.addEventListener('mouseout', handleMouseOut as EventListener, true);
-            element.addEventListener('click', handleClick as EventListener, true);
-          }
-        });
-      });
-    });
-    
-    observer.observe(iframeDoc.body, {
-      childList: true,
-      subtree: true
-    });
+    // MutationObserver는 제거 (이벤트 위임으로 자동 처리됨)
     
     listenersAttached.current = true;
     console.log('✅ 영역 선택 모드 활성화 완료');
@@ -802,10 +784,20 @@ const Step3PreEdit: React.FC<{
               
               iframeDoc.addEventListener('keydown', handleKeyDown, true);
               
-              // 변경 사항 추적
+              // ⚡ 최적화: input 이벤트 디바운스 (메모리 사용 감소)
+              let inputTimeoutId: NodeJS.Timeout | null = null;
               const handleInput = () => {
-                const updatedHtml = iframeDoc.documentElement.outerHTML;
-                onHtmlChange(updatedHtml);
+                // 기존 타이머 취소
+                if (inputTimeoutId) {
+                  clearTimeout(inputTimeoutId);
+                }
+                
+                // 500ms 후에 HTML 추출 (디바운스)
+                inputTimeoutId = setTimeout(() => {
+                  const updatedHtml = iframeDoc.documentElement.outerHTML;
+                  onHtmlChange(updatedHtml);
+                  inputTimeoutId = null;
+                }, 500);
               };
               iframeDoc.body.addEventListener('input', handleInput);
             } else {
@@ -1852,10 +1844,20 @@ const Step5ParallelEdit: React.FC<{
       
       iframeDoc.addEventListener('keydown', handleKeyDown, true);
       
-      // 변경 사항 추적 - Step 3와 동일
+      // ⚡ 최적화: input 이벤트 디바운스 (메모리 사용 감소)
+      let inputTimeoutId: NodeJS.Timeout | null = null;
       const handleInput = () => {
-        const updatedHtml = iframeDoc.documentElement.outerHTML;
-        onTranslatedChange(updatedHtml);
+        // 기존 타이머 취소
+        if (inputTimeoutId) {
+          clearTimeout(inputTimeoutId);
+        }
+        
+        // 500ms 후에 HTML 추출 (디바운스)
+        inputTimeoutId = setTimeout(() => {
+          const updatedHtml = iframeDoc.documentElement.outerHTML;
+          onTranslatedChange(updatedHtml);
+          inputTimeoutId = null;
+        }, 500);
       };
       iframeDoc.body.addEventListener('input', handleInput);
 

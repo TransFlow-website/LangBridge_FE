@@ -200,11 +200,21 @@ function WebPageEditor() {
               el.setAttribute('contenteditable', 'false')
             })
             
-            // 변경 사항 추적 (모든 편집 가능한 요소에서)
+            // ⚡ 최적화: input 이벤트 디바운스 (메모리 사용 감소)
+            let inputTimeoutId = null
             iframeDoc.body.addEventListener('input', () => {
-              const updatedHtml = iframeDoc.documentElement.outerHTML
-              setEditedHtml(updatedHtml)
-              console.log('텍스트 편집됨!')
+              // 기존 타이머 취소
+              if (inputTimeoutId) {
+                clearTimeout(inputTimeoutId)
+              }
+              
+              // 500ms 후에 HTML 추출 (디바운스)
+              inputTimeoutId = setTimeout(() => {
+                const updatedHtml = iframeDoc.documentElement.outerHTML
+                setEditedHtml(updatedHtml)
+                console.log('텍스트 편집됨!')
+                inputTimeoutId = null
+              }, 500)
             })
             
             // 텍스트 선택 가능하게

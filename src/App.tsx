@@ -18,8 +18,6 @@ import TranslationsWorking from './pages/TranslationsWorking';
 import Reviews from './pages/Reviews';
 import DocumentReview from './pages/DocumentReview';
 import TranslationsFavorites from './pages/TranslationsFavorites';
-const DocumentsCategories = () => <div className="p-8"><h1 className="text-2xl font-bold">카테고리별 문서</h1></div>;
-const DocumentsStatus = () => <div className="p-8"><h1 className="text-2xl font-bold">상태별 문서</h1></div>;
 const Glossary = () => <div className="p-8"><h1 className="text-2xl font-bold">용어집 보기</h1></div>;
 const GlossaryManage = () => <div className="p-8"><h1 className="text-2xl font-bold">용어집 관리</h1></div>;
 const Activity = () => <div className="p-8"><h1 className="text-2xl font-bold">내 활동</h1></div>;
@@ -91,16 +89,6 @@ function App() {
                         <Route path="/documents" element={
                           <ErrorBoundary>
                             <Documents />
-                          </ErrorBoundary>
-                        } />
-                        <Route path="/documents/categories" element={
-                          <ErrorBoundary>
-                            <DocumentsCategories />
-                          </ErrorBoundary>
-                        } />
-                        <Route path="/documents/status" element={
-                          <ErrorBoundary>
-                            <DocumentsStatus />
                           </ErrorBoundary>
                         } />
                         <Route path="/translations/new" element={
