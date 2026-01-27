@@ -34,6 +34,17 @@ export interface DocumentResponse {
   };
   createdAt: string;
   updatedAt: string;
+  latestHandover?: {
+    memo: string;
+    terms?: string;
+    completedParagraphs?: number[];
+    handedOverBy?: {
+      id: number;
+      email: string;
+      name: string;
+    };
+    handedOverAt: string;
+  };
 }
 
 export interface CreateDocumentVersionRequest {

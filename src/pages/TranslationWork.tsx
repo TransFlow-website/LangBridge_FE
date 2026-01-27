@@ -116,6 +116,24 @@ export default function TranslationWork() {
         console.log('✅ 문서 조회 성공:', doc);
         setDocument(doc);
 
+        // 인계 정보가 있으면 알림 표시
+        if (doc.latestHandover) {
+          const handover = doc.latestHandover;
+          const handoverMessage = `📋 이전 번역자의 인계 메모:\n\n${handover.memo}\n\n` +
+            (handover.terms ? `⚠️ 주의 용어/표현: ${handover.terms}\n\n` : '') +
+            (handover.completedParagraphs && handover.completedParagraphs.length > 0
+              ? `✅ 완료된 문단: ${handover.completedParagraphs.join(', ')}\n\n`
+              : '') +
+            (handover.handedOverBy
+              ? `👤 인계자: ${handover.handedOverBy.name}\n`
+              : '');
+          
+          // 약간의 지연 후 표시 (페이지 로드 후)
+          setTimeout(() => {
+            alert(handoverMessage);
+          }, 500);
+        }
+
         // 2. 락 획득 시도 (재시도 로직 포함)
         console.log('🔒 락 획득 시도:', documentId);
         let lockAttempts = 0;
