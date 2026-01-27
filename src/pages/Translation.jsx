@@ -170,12 +170,26 @@ function Translation() {
       if (iframeDoc) {
         let htmlContent = editedOriginalHtml
         
+        // editedOriginalHtml이 body 내용만 있는지 확인
+        const isBodyContentOnly = !htmlContent.trim().toLowerCase().startsWith('<!doctype') && 
+                                   !htmlContent.includes('<html') && 
+                                   !htmlContent.includes('<body')
+        
+        // body 내용만 있는 경우에만 body로 감싸기
+        if (isBodyContentOnly) {
+          htmlContent = `<body>${htmlContent}</body>`
+        }
+        
         // HTML 구조 확인 및 보완
         const hasDoctype = htmlContent.trim().toLowerCase().startsWith('<!doctype')
         const hasHtml = htmlContent.includes('<html')
         const hasBody = htmlContent.includes('<body')
         
-        if (!hasDoctype || !hasHtml || !hasBody) {
+        // 이미 완전한 HTML 문서 구조인지 확인
+        const isCompleteDocument = hasDoctype && hasHtml && hasBody
+        
+        // 완전한 구조가 아닐 때만 보완 (중복 wrapper 방지)
+        if (!isCompleteDocument) {
           if (!htmlContent.includes('<body')) {
             htmlContent = `<body>${htmlContent}</body>`
           }
@@ -238,10 +252,13 @@ function Translation() {
         setTimeout(() => {
           if (iframeDoc.body) {
             enableTextEditing(iframeDoc)
-            // 편집 내용 추적
+            // 편집 내용 추적 - body 내용만 저장 (wrapper 방지)
             iframeDoc.body.addEventListener('input', () => {
-              const updatedHtml = iframeDoc.documentElement.outerHTML
-              setEditedOriginalHtml(updatedHtml)
+              if (iframeDoc.body) {
+                // body의 innerHTML만 저장 (wrapper 방지)
+                const bodyContent = iframeDoc.body.innerHTML
+                setEditedOriginalHtml(bodyContent)
+              }
             })
           }
         }, 200)
@@ -681,56 +698,37 @@ function Translation() {
       updateSelectedElements()
     }
     
-    // 모든 요소에 직접 이벤트 리스너 추가 (가장 확실한 방법)
-    const attachListenersToAllElements = () => {
-      const allElements = iframeDoc.querySelectorAll('*')
-      console.log('총 요소 개수:', allElements.length)
-      
-      allElements.forEach((el) => {
-        if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'NOSCRIPT') return
-        if (el === iframeDoc.body || el === iframeDoc.documentElement) return
-        
-        // 기존 리스너 제거 후 새로 추가
-        el.removeEventListener('mouseover', handleMouseOver)
-        el.removeEventListener('mouseout', handleMouseOut)
-        el.removeEventListener('click', handleClick)
-        
-        el.addEventListener('mouseover', handleMouseOver, true)
-        el.addEventListener('mouseout', handleMouseOut, true)
-        el.addEventListener('click', handleClick, true)
-      })
-      
-      console.log('✅ 모든 요소에 이벤트 리스너 추가 완료')
-    }
-    
-    // 즉시 실행
-    attachListenersToAllElements()
-    
-    // body에도 추가
+    // ⚡ 최적화: 이벤트 위임 사용 (body에만 리스너 추가)
+    // 모든 요소에 개별 리스너를 추가하는 대신 body에서 이벤트 위임 사용
     if (iframeDoc.body) {
-      iframeDoc.body.addEventListener('mouseover', handleMouseOver, true)
-      iframeDoc.body.addEventListener('mouseout', handleMouseOut, true)
-      iframeDoc.body.addEventListener('click', handleClick, true)
+      // mouseover 이벤트 위임
+      iframeDoc.body.addEventListener('mouseover', (e) => {
+        const target = e.target
+        if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) return
+        if (target.tagName === 'SCRIPT' || target.tagName === 'STYLE' || target.tagName === 'NOSCRIPT') return
+        handleMouseOver(e)
+      }, true)
+      
+      // mouseout 이벤트 위임
+      iframeDoc.body.addEventListener('mouseout', (e) => {
+        const target = e.target
+        if (target && !target.classList.contains('transflow-selected')) {
+          handleMouseOut(e)
+        }
+      }, true)
+      
+      // click 이벤트 위임
+      iframeDoc.body.addEventListener('click', (e) => {
+        const target = e.target
+        if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) return
+        if (target.tagName === 'SCRIPT' || target.tagName === 'STYLE' || target.tagName === 'NOSCRIPT') return
+        handleClick(e)
+      }, true)
+      
+      console.log('✅ 이벤트 위임으로 메모리 최적화 완료 (body에만 리스너 추가)')
     }
     
-    // 새로 추가되는 요소에도 리스너 추가 (MutationObserver 사용)
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1) { // Element node
-            if (node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.tagName === 'NOSCRIPT') return
-            node.addEventListener('mouseover', handleMouseOver, true)
-            node.addEventListener('mouseout', handleMouseOut, true)
-            node.addEventListener('click', handleClick, true)
-          }
-        })
-      })
-    })
-    
-    observer.observe(iframeDoc.body, {
-      childList: true,
-      subtree: true
-    })
+    // MutationObserver는 제거 (이벤트 위임으로 자동 처리됨)
     
     console.log('✅ 영역 선택 모드 활성화 완료!')
   }
@@ -804,10 +802,20 @@ function Translation() {
     // 키보드 이벤트 리스너 추가 (capture phase에서만 특정 키 처리)
     iframeDoc.addEventListener('keydown', handleKeyDown, true)
     
-    // 변경 사항 추적
+    // ⚡ 최적화: input 이벤트 디바운스 (메모리 사용 감소)
+    let inputTimeoutId = null
     const handleInput = () => {
-      const updatedHtml = iframeDoc.documentElement.outerHTML
-      setEditedHtml(updatedHtml)
+      // 기존 타이머 취소
+      if (inputTimeoutId) {
+        clearTimeout(inputTimeoutId)
+      }
+      
+      // 500ms 후에 HTML 추출 (디바운스)
+      inputTimeoutId = setTimeout(() => {
+        const updatedHtml = iframeDoc.documentElement.outerHTML
+        setEditedHtml(updatedHtml)
+        inputTimeoutId = null
+      }, 500)
     }
     iframeDoc.body.addEventListener('input', handleInput)
     
@@ -886,9 +894,16 @@ function Translation() {
       })
     }
     
-    // 편집된 원본 HTML 저장
-    const finalHtml = iframeDoc.documentElement.outerHTML
-    setEditedOriginalHtml(finalHtml)
+    // 편집된 원본 HTML 저장 - body 내용만 추출 (wrapper 방지)
+    if (iframeDoc.body) {
+      // body의 innerHTML만 저장 (wrapper 방지)
+      const bodyContent = iframeDoc.body.innerHTML
+      setEditedOriginalHtml(bodyContent)
+    } else {
+      // body가 없으면 전체 문서 저장 (fallback)
+      const finalHtml = iframeDoc.documentElement.outerHTML
+      setEditedOriginalHtml(finalHtml)
+    }
     
     // 원본 편집 모드로 전환
     setIsSelectionMode(false)

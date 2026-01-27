@@ -41,8 +41,6 @@ export const sidebarMenu: MenuItem[] = [
     icon: 'FolderOpen',
     children: [
       { label: '전체 문서', path: '/documents' },
-      { label: '카테고리별 문서', path: '/documents/categories' },
-      { label: '상태별 문서', path: '/documents/status' },
     ],
   },
   {

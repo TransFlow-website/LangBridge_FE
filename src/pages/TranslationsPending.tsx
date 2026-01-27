@@ -174,6 +174,7 @@ export default function TranslationsPending() {
   });
   const [categoryMap, setCategoryMap] = useState<Map<number, string>>(new Map());
   const [categories, setCategories] = useState<string[]>(['전체']);
+  const [favoriteStatus, setFavoriteStatus] = useState<Map<number, boolean>>(new Map());
 
   // 카테고리 목록 로드
   useEffect(() => {
@@ -193,6 +194,32 @@ export default function TranslationsPending() {
     };
     loadCategories();
   }, []);
+
+  // 찜 상태 로드
+  useEffect(() => {
+    const loadFavoriteStatus = async () => {
+      try {
+        const favoriteMap = new Map<number, boolean>();
+        await Promise.all(
+          documents.map(async (doc) => {
+            try {
+              const isFavorite = await documentApi.isFavorite(doc.id);
+              favoriteMap.set(doc.id, isFavorite);
+            } catch (error) {
+              console.warn(`문서 ${doc.id}의 찜 상태를 가져올 수 없습니다:`, error);
+              favoriteMap.set(doc.id, false);
+            }
+          })
+        );
+        setFavoriteStatus(favoriteMap);
+      } catch (error) {
+        console.error('찜 상태 로드 실패:', error);
+      }
+    };
+    if (documents.length > 0) {
+      loadFavoriteStatus();
+    }
+  }, [documents]);
 
   // API에서 문서 목록 가져오기
   useEffect(() => {
@@ -343,6 +370,31 @@ export default function TranslationsPending() {
     navigate(`/translations/${doc.id}/work`);
   };
 
+  const handleToggleFavorite = async (doc: DocumentListItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const isFavorite = favoriteStatus.get(doc.id) || false;
+      if (isFavorite) {
+        await documentApi.removeFavorite(doc.id);
+        setFavoriteStatus(prev => {
+          const newMap = new Map(prev);
+          newMap.set(doc.id, false);
+          return newMap;
+        });
+      } else {
+        await documentApi.addFavorite(doc.id);
+        setFavoriteStatus(prev => {
+          const newMap = new Map(prev);
+          newMap.set(doc.id, true);
+          return newMap;
+        });
+      }
+    } catch (error) {
+      console.error('찜 상태 변경 실패:', error);
+      alert('찜 상태를 변경하는데 실패했습니다.');
+    }
+  };
+
   // 상태 텍스트 변환
   const getStatusText = (status: DocumentState) => {
     const statusMap: Record<DocumentState, string> = {
@@ -361,9 +413,31 @@ export default function TranslationsPending() {
       key: 'title',
       label: '문서 제목',
       width: '25%',
-      render: (item) => (
-        <span style={{ fontWeight: 500, color: '#000000' }}>{item.title}</span>
-      ),
+      render: (item) => {
+        const isFavorite = favoriteStatus.get(item.id) || false;
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={(e) => handleToggleFavorite(item, e)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                fontSize: '18px',
+                color: isFavorite ? '#FFD700' : '#C0C0C0',
+                transition: 'color 0.2s',
+              }}
+              title={isFavorite ? '찜 해제' : '찜 추가'}
+            >
+              {isFavorite ? '★' : '☆'}
+            </button>
+            <span style={{ fontWeight: 500, color: '#000000' }}>{item.title}</span>
+          </div>
+        );
+      },
     },
     {
       key: 'status',

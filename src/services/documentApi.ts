@@ -34,6 +34,17 @@ export interface DocumentResponse {
   };
   createdAt: string;
   updatedAt: string;
+  latestHandover?: {
+    memo: string;
+    terms?: string;
+    completedParagraphs?: number[];
+    handedOverBy?: {
+      id: number;
+      email: string;
+      name: string;
+    };
+    handedOverAt: string;
+  };
 }
 
 export interface CreateDocumentVersionRequest {
@@ -178,6 +189,36 @@ export const documentApi = {
     const url = `/documents${queryString ? `?${queryString}` : ''}`;
     const response = await apiClient.get<DocumentResponse[]>(url);
     return response.data;
+  },
+
+  /**
+   * 문서 찜 추가
+   */
+  addFavorite: async (documentId: number): Promise<void> => {
+    await apiClient.post(`/documents/${documentId}/favorite`);
+  },
+
+  /**
+   * 문서 찜 제거
+   */
+  removeFavorite: async (documentId: number): Promise<void> => {
+    await apiClient.delete(`/documents/${documentId}/favorite`);
+  },
+
+  /**
+   * 찜한 문서 목록 조회
+   */
+  getFavoriteDocuments: async (): Promise<DocumentResponse[]> => {
+    const response = await apiClient.get<DocumentResponse[]>('/documents/favorites');
+    return response.data;
+  },
+
+  /**
+   * 문서 찜 여부 확인
+   */
+  isFavorite: async (documentId: number): Promise<boolean> => {
+    const response = await apiClient.get<{ isFavorite: boolean }>(`/documents/${documentId}/favorite`);
+    return response.data.isFavorite;
   },
 };
 
