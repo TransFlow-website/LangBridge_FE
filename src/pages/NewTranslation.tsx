@@ -1129,6 +1129,23 @@ const Step3PreEdit: React.FC<{
     }
   };
 
+  // 일반적인 컨테이너 클래스명 패턴 인식
+  const isLikelyContainer = (element: HTMLElement): boolean => {
+    const className = (element.className || '').toString();
+    const containerPatterns = [
+      /container/i,
+      /wrapper/i,
+      /main-content/i,
+      /content-wrapper/i,
+      /page-content/i,
+      /article-wrapper/i,
+      /section-container/i,
+      /content-container/i,
+      /main-wrapper/i
+    ];
+    return containerPatterns.some(pattern => pattern.test(className));
+  };
+
   // 공백 제거 함수들
   const removeSpacing = (type: 'top' | 'bottom' | 'left' | 'right' | 'auto') => {
     if (!iframeRef.current) return;
@@ -1305,89 +1322,141 @@ const Step3PreEdit: React.FC<{
     spacingStyle.textContent = rules.join('\n');
     console.log('🔍 적용된 CSS 규칙:', rules);
 
-    // 🔍 인라인 스타일로 직접 적용 (CSS 규칙보다 우선순위가 높음)
-    if (type === 'auto') {
-      // 자동 모드: 모든 마진과 패딩 제거
-      if (iframeDoc.body) {
-        iframeDoc.body.style.margin = '0';
-        iframeDoc.body.style.padding = '0';
-      }
-      parentElementsList.forEach((parent) => {
-        parent.style.margin = '0';
-        parent.style.padding = '0';
-        // 🔍 wrapper의 width와 max-width도 100%로 설정
-        if (parent.classList.contains('wrapper')) {
-          parent.style.width = '100%';
-          parent.style.maxWidth = '100%';
-        }
-      });
-      
-      // 🔍 선택된 요소 자체의 마진도 제거 (width: 70%로 인한 자동 마진 제거)
-      allSelectedElements.forEach((selectedEl) => {
-        (selectedEl as HTMLElement).style.marginLeft = '0';
-        (selectedEl as HTMLElement).style.marginRight = '0';
-        (selectedEl as HTMLElement).style.width = '100%';
-      });
-    } else {
-      // 개별 모드
-      if (type === 'top' || spacingRemovedRef.current.top) {
-        if (iframeDoc.body) {
-          iframeDoc.body.style.marginTop = '0';
-        }
-        parentElementsList.forEach((parent) => {
-          parent.style.marginTop = '0';
-        });
-      }
-      if (type === 'bottom' || spacingRemovedRef.current.bottom) {
-        if (iframeDoc.body) {
-          iframeDoc.body.style.marginBottom = '0';
-        }
-        parentElementsList.forEach((parent) => {
-          parent.style.marginBottom = '0';
-        });
-      }
-      if (type === 'left' || spacingRemovedRef.current.left) {
-        if (iframeDoc.body) {
-          iframeDoc.body.style.paddingLeft = '0';
-          iframeDoc.body.style.marginLeft = '0';
-        }
-        parentElementsList.forEach((parent) => {
-          parent.style.paddingLeft = '0';
-          parent.style.marginLeft = '0';
-          // 🔍 wrapper의 width도 100%로 설정
-          if (parent.classList.contains('wrapper')) {
-            parent.style.width = '100%';
+    // 🔍 계산된 스타일 기반으로 인라인 스타일 직접 적용 (CSS 규칙보다 우선순위가 높음)
+    // 이 방식은 어떤 CSS 프레임워크를 사용하든 실제 적용된 값을 기준으로 처리하므로 보편적임
+    
+    // Body 처리
+    if (iframeDoc.body) {
+      const bodyComputed = iframeDoc.defaultView?.getComputedStyle(iframeDoc.body);
+      if (bodyComputed) {
+        if (type === 'auto' || type === 'top' || spacingRemovedRef.current.top) {
+          const marginTop = parseFloat(bodyComputed.marginTop);
+          const paddingTop = parseFloat(bodyComputed.paddingTop);
+          if (marginTop > 0 || paddingTop > 0) {
+            iframeDoc.body.style.marginTop = '0';
+            iframeDoc.body.style.paddingTop = '0';
           }
-        });
-        
-        // 🔍 선택된 요소 자체의 왼쪽 마진도 제거
-        allSelectedElements.forEach((selectedEl) => {
-          (selectedEl as HTMLElement).style.marginLeft = '0';
-        });
-      }
-      if (type === 'right' || spacingRemovedRef.current.right) {
-        if (iframeDoc.body) {
-          iframeDoc.body.style.paddingRight = '0';
-          iframeDoc.body.style.marginRight = '0';
         }
-        parentElementsList.forEach((parent) => {
-          parent.style.paddingRight = '0';
-          parent.style.marginRight = '0';
-          // 🔍 wrapper의 width와 max-width도 100%로 설정
-          if (parent.classList.contains('wrapper')) {
-            parent.style.width = '100%';
-            parent.style.maxWidth = '100%';
+        if (type === 'auto' || type === 'bottom' || spacingRemovedRef.current.bottom) {
+          const marginBottom = parseFloat(bodyComputed.marginBottom);
+          const paddingBottom = parseFloat(bodyComputed.paddingBottom);
+          if (marginBottom > 0 || paddingBottom > 0) {
+            iframeDoc.body.style.marginBottom = '0';
+            iframeDoc.body.style.paddingBottom = '0';
           }
-        });
-        
-        // 🔍 선택된 요소 자체의 오른쪽 마진도 제거 + width: 100%로 변경
-        allSelectedElements.forEach((selectedEl) => {
-          (selectedEl as HTMLElement).style.marginRight = '0';
-          (selectedEl as HTMLElement).style.marginLeft = '0';
-          (selectedEl as HTMLElement).style.width = '100%'; // width: 70%로 인한 자동 마진 제거
-        });
+        }
+        if (type === 'auto' || type === 'left' || spacingRemovedRef.current.left) {
+          const marginLeft = parseFloat(bodyComputed.marginLeft);
+          const paddingLeft = parseFloat(bodyComputed.paddingLeft);
+          if (marginLeft > 0 || paddingLeft > 0) {
+            iframeDoc.body.style.marginLeft = '0';
+            iframeDoc.body.style.paddingLeft = '0';
+          }
+        }
+        if (type === 'auto' || type === 'right' || spacingRemovedRef.current.right) {
+          const marginRight = parseFloat(bodyComputed.marginRight);
+          const paddingRight = parseFloat(bodyComputed.paddingRight);
+          if (marginRight > 0 || paddingRight > 0) {
+            iframeDoc.body.style.marginRight = '0';
+            iframeDoc.body.style.paddingRight = '0';
+          }
+        }
       }
     }
+
+    // 부모 요소들 처리 (계산된 스타일 기반)
+    parentElementsList.forEach((parent) => {
+      const computed = iframeDoc.defaultView?.getComputedStyle(parent);
+      if (!computed) return;
+
+      // 실제 공백 값 확인
+      const marginTop = parseFloat(computed.marginTop);
+      const marginBottom = parseFloat(computed.marginBottom);
+      const marginLeft = parseFloat(computed.marginLeft);
+      const marginRight = parseFloat(computed.marginRight);
+      const paddingTop = parseFloat(computed.paddingTop);
+      const paddingBottom = parseFloat(computed.paddingBottom);
+      const paddingLeft = parseFloat(computed.paddingLeft);
+      const paddingRight = parseFloat(computed.paddingRight);
+
+      // 실제 공백이 있을 때만 제거 (인라인 스타일로 강제 적용)
+      if (type === 'auto' || type === 'top' || spacingRemovedRef.current.top) {
+        if (marginTop > 0 || paddingTop > 0) {
+          parent.style.marginTop = '0';
+          parent.style.paddingTop = '0';
+        }
+      }
+      if (type === 'auto' || type === 'bottom' || spacingRemovedRef.current.bottom) {
+        if (marginBottom > 0 || paddingBottom > 0) {
+          parent.style.marginBottom = '0';
+          parent.style.paddingBottom = '0';
+        }
+      }
+      if (type === 'auto' || type === 'left' || spacingRemovedRef.current.left) {
+        if (marginLeft > 0 || paddingLeft > 0) {
+          parent.style.marginLeft = '0';
+          parent.style.paddingLeft = '0';
+        }
+      }
+      if (type === 'auto' || type === 'right' || spacingRemovedRef.current.right) {
+        if (marginRight > 0 || paddingRight > 0) {
+          parent.style.marginRight = '0';
+          parent.style.paddingRight = '0';
+        }
+      }
+
+      // Width 제한 제거 (컨테이너로 보이거나 width가 제한되어 있으면)
+      const width = computed.width;
+      const maxWidth = computed.maxWidth;
+      const isContainer = isLikelyContainer(parent);
+      
+      // 컨테이너로 보이거나 width가 100%가 아니거나 max-width가 설정되어 있으면 100%로 설정
+      if (isContainer || (width !== '100%' && width !== 'auto' && maxWidth !== 'none' && maxWidth !== '100%')) {
+        parent.style.width = '100%';
+        if (maxWidth !== 'none' && maxWidth !== '100%') {
+          parent.style.maxWidth = '100%';
+        }
+      }
+      
+      // margin: auto로 인한 중앙 정렬 제거
+      if (computed.marginLeft === 'auto' || computed.marginRight === 'auto') {
+        parent.style.marginLeft = '0';
+        parent.style.marginRight = '0';
+      }
+    });
+
+    // 선택된 요소 자체 처리
+    allSelectedElements.forEach((selectedEl) => {
+      const el = selectedEl as HTMLElement;
+      const computed = iframeDoc.defaultView?.getComputedStyle(el);
+      if (!computed) return;
+
+      // 선택된 요소의 margin과 width 처리
+      if (type === 'auto' || type === 'left' || type === 'right' || 
+          spacingRemovedRef.current.left || spacingRemovedRef.current.right) {
+        const marginLeft = parseFloat(computed.marginLeft);
+        const marginRight = parseFloat(computed.marginRight);
+        const width = computed.width;
+        
+        if (marginLeft > 0 || marginLeft < 0) {
+          el.style.marginLeft = '0';
+        }
+        if (marginRight > 0 || marginRight < 0) {
+          el.style.marginRight = '0';
+        }
+        
+        // width가 100%가 아니면 100%로 설정
+        if (width !== '100%' && width !== 'auto') {
+          el.style.width = '100%';
+        }
+      }
+      
+      // margin: auto 제거
+      if (computed.marginLeft === 'auto' || computed.marginRight === 'auto') {
+        el.style.marginLeft = '0';
+        el.style.marginRight = '0';
+      }
+    });
 
     // 🔍 디버깅: 버튼 클릭 후 HTML 및 스타일 정보
     setTimeout(() => {
