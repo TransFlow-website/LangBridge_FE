@@ -565,6 +565,9 @@ const Step3PreEdit: React.FC<{
   const spacingClickHandlersRef = React.useRef<Map<HTMLElement, (e: Event) => void>>(new Map());
   // 링크 클릭 방지 핸들러 저장 (제거를 위해)
   const linkClickHandlersRef = React.useRef<Map<HTMLElement, (e: Event) => void>>(new Map());
+  // window 키보드 이벤트 리스너 저장 (cleanup에서 제거하기 위해)
+  const windowKeydownHandlerRef = React.useRef<((e: KeyboardEvent) => void) | null>(null);
+  const iframeKeydownHandlerRef = React.useRef<((e: KeyboardEvent) => void) | null>(null);
   
   // 공백 제거 상태 추적
   const spacingRemovedRef = React.useRef<{
@@ -712,6 +715,42 @@ const Step3PreEdit: React.FC<{
       // 선택된 요소 초기화
       setSelectedElements([]);
       
+      // ⭐ 텍스트 모드 키보드 단축키 (Ctrl+Z, Ctrl+Shift+Z)
+      const handleTextKeydown = (e: KeyboardEvent) => {
+        // Cmd+Z (Mac) 또는 Ctrl+Z (Windows) - Undo
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          iframeDoc.execCommand('undo', false);
+          const updatedHtml = iframeDoc.documentElement.outerHTML;
+          onHtmlChange(updatedHtml);
+          console.log('↩️ Undo (Step 3 텍스트 편집)');
+        }
+        // Cmd+Shift+Z (Mac) 또는 Ctrl+Y (Windows) - Redo
+        else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          iframeDoc.execCommand('redo', false);
+          const updatedHtml = iframeDoc.documentElement.outerHTML;
+          onHtmlChange(updatedHtml);
+          console.log('↪️ Redo (Step 3 텍스트 편집)');
+        }
+        
+        // ⭐ 백스페이스 키 처리 (브라우저 기본 동작 허용)
+        if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          console.log('⌫ 백스페이스 (STEP 3 텍스트 편집)');
+        }
+      };
+      
+      // 기존 리스너 제거
+      if (iframeKeydownHandlerRef.current && iframeDoc) {
+        iframeDoc.removeEventListener('keydown', iframeKeydownHandlerRef.current, true);
+      }
+      // 새 리스너 등록 및 저장
+      iframeKeydownHandlerRef.current = handleTextKeydown;
+      iframeDoc.addEventListener('keydown', handleTextKeydown, true);
+      console.log('✅ Step 3 텍스트 모드 키보드 단축키 등록 완료');
+      
     } else if (mode === 'component') {
       // 컴포넌트 편집 모드
       // contentEditable 비활성화
@@ -830,6 +869,156 @@ const Step3PreEdit: React.FC<{
       
       console.log('✅ 컴포넌트 클릭 리스너 추가 완료:', componentElements.length, '개');
       console.log('✅ 링크 클릭 방지 핸들러 추가 완료:', allLinks.length, '개');
+      
+      // ⭐ 컴포넌트 모드 키보드 단축키 (Ctrl+Z, Ctrl+Shift+Z)
+      const handleComponentKeydown = (e: KeyboardEvent) => {
+        console.log('🔑 Step 3 iframe 키 감지:', e.key, 'ctrl:', e.ctrlKey, 'meta:', e.metaKey, 'shift:', e.shiftKey);
+        // Cmd+Z (Mac) 또는 Ctrl+Z (Windows) - Undo
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          
+          if (undoStackRef.current.length > 0) {
+            console.log('↩️ Undo (Step 3 컴포넌트 편집) - stack:', undoStackRef.current.length);
+            
+            // 현재 상태를 redo stack에 저장
+            redoStackRef.current.push(currentHtmlRef.current);
+            
+            // undo stack에서 이전 상태 복원
+            const previousHtml = undoStackRef.current.pop()!;
+            currentHtmlRef.current = previousHtml;
+            
+            // iframe에 HTML 복원
+            iframeDoc.open();
+            iframeDoc.write(previousHtml);
+            iframeDoc.close();
+            
+            onHtmlChange(previousHtml);
+            setSelectedElements([]);
+            
+            // 컴포넌트 편집 모드 다시 활성화
+            setTimeout(() => {
+              setMode('text');
+              setTimeout(() => setMode('component'), 0);
+            }, 10);
+          } else {
+            console.log('⚠️ Step 3 컴포넌트 Undo stack이 비어있습니다');
+          }
+        }
+        // Cmd+Shift+Z (Mac) 또는 Ctrl+Y (Windows) - Redo
+        else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          
+          if (redoStackRef.current.length > 0) {
+            console.log('↪️ Redo (Step 3 컴포넌트 편집) - stack:', redoStackRef.current.length);
+            
+            // 현재 상태를 undo stack에 저장
+            undoStackRef.current.push(currentHtmlRef.current);
+            
+            // redo stack에서 다음 상태 복원
+            const nextHtml = redoStackRef.current.pop()!;
+            currentHtmlRef.current = nextHtml;
+            
+            // iframe에 HTML 복원
+            iframeDoc.open();
+            iframeDoc.write(nextHtml);
+            iframeDoc.close();
+            
+            onHtmlChange(nextHtml);
+            setSelectedElements([]);
+            
+            // 컴포넌트 편집 모드 다시 활성화
+            setTimeout(() => {
+              setMode('text');
+              setTimeout(() => setMode('component'), 0);
+            }, 10);
+          } else {
+            console.log('⚠️ Step 3 컴포넌트 Redo stack이 비어있습니다');
+          }
+        }
+      };
+      
+      // 기존 리스너 제거
+      if (iframeKeydownHandlerRef.current && iframeDoc) {
+        iframeDoc.removeEventListener('keydown', iframeKeydownHandlerRef.current, true);
+      }
+      // 새 리스너 등록 및 저장
+      iframeKeydownHandlerRef.current = handleComponentKeydown;
+      iframeDoc.addEventListener('keydown', handleComponentKeydown, true);
+      console.log('✅ Step 3 컴포넌트 모드 키보드 단축키 등록 완료');
+      
+      // 부모 window에서도 이벤트 잡기 (iframe 포커스가 없을 때 대비)
+      const handleWindowKeydown = (e: KeyboardEvent) => {
+        console.log('🔑 Step 3 window 키 감지:', e.key, 'ctrl:', e.ctrlKey, 'meta:', e.metaKey, 'shift:', e.shiftKey);
+        
+        // Ctrl+Z (되돌리기)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          
+          if (undoStackRef.current.length > 0 && iframeDoc) {
+            console.log('↩️ Undo (Step 3 컴포넌트 편집 - window)');
+            console.log('📊 Step 3 Undo stack:', undoStackRef.current.length, '| Redo stack:', redoStackRef.current.length);
+            
+            redoStackRef.current.push(currentHtmlRef.current);
+            const previousHtml = undoStackRef.current.pop()!;
+            console.log('📊 Step 3 Undo 후 - Undo stack:', undoStackRef.current.length, '| Redo stack:', redoStackRef.current.length);
+            currentHtmlRef.current = previousHtml;
+            
+            iframeDoc.open();
+            iframeDoc.write(previousHtml);
+            iframeDoc.close();
+            
+            onHtmlChange(previousHtml);
+            setSelectedElements([]);
+            
+            setTimeout(() => {
+              setMode('text');
+              setTimeout(() => setMode('component'), 0);
+            }, 10);
+          }
+        }
+        // Ctrl+Shift+Z 또는 Ctrl+Y (다시 실행)
+        else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          console.log('🔑 Step 3 Redo 키 감지! key:', e.key, 'Redo stack:', redoStackRef.current.length);
+          
+          if (redoStackRef.current.length > 0 && iframeDoc) {
+            console.log('↪️ Redo (Step 3 컴포넌트 편집 - window)');
+            console.log('📊 Step 3 Redo 전 - Undo stack:', undoStackRef.current.length, '| Redo stack:', redoStackRef.current.length);
+            
+            undoStackRef.current.push(currentHtmlRef.current);
+            const nextHtml = redoStackRef.current.pop()!;
+            console.log('📊 Step 3 Redo 후 - Undo stack:', undoStackRef.current.length, '| Redo stack:', redoStackRef.current.length);
+            currentHtmlRef.current = nextHtml;
+            
+            iframeDoc.open();
+            iframeDoc.write(nextHtml);
+            iframeDoc.close();
+            
+            onHtmlChange(nextHtml);
+            setSelectedElements([]);
+            
+            setTimeout(() => {
+              setMode('text');
+              setTimeout(() => setMode('component'), 0);
+            }, 10);
+          } else {
+            console.log('⚠️ Step 3 Redo stack이 비어있음 (window)');
+          }
+        }
+      };
+      
+      // 기존 window 리스너 제거
+      if (windowKeydownHandlerRef.current) {
+        window.removeEventListener('keydown', windowKeydownHandlerRef.current, true);
+      }
+      // 새 window 리스너 등록 및 저장
+      windowKeydownHandlerRef.current = handleWindowKeydown;
+      window.addEventListener('keydown', handleWindowKeydown, true);
+      console.log('✅ Step 3 window 키보드 이벤트 리스너 등록 완료');
       
     } else if (mode === 'spacing') {
       // 공백 제거 모드
@@ -1039,6 +1228,17 @@ const Step3PreEdit: React.FC<{
       
       console.log('✅ 전체 공백 제거 모드 활성화 (Step 2 선택 영역 전체에 공백 제거 적용)');
     }
+    
+    // ⭐ Cleanup: window 이벤트 리스너 제거
+    return () => {
+      console.log('🧹 Step 3 cleanup: 이벤트 리스너 제거');
+      // window 리스너 제거
+      if (windowKeydownHandlerRef.current) {
+        window.removeEventListener('keydown', windowKeydownHandlerRef.current, true);
+        console.log('✅ Step 3 window 키보드 리스너 제거');
+      }
+      // iframe 리스너는 모드 전환 시 자동으로 제거됨 (DOM이 재설정되므로)
+    };
   }, [mode, isInitialized]);
 
   // 초기 렌더링만 수행 (한 번만 실행)
@@ -1320,7 +1520,10 @@ const Step3PreEdit: React.FC<{
         if (currentHtmlRef.current && currentHtmlRef.current !== currentHtml) {
           undoStackRef.current.push(currentHtmlRef.current);
           redoStackRef.current = []; // 새 작업 시 redo stack 초기화
-          console.log('💾 Undo stack에 저장 (삭제 전):', undoStackRef.current.length);
+          console.log('💾 Step 3 Undo stack에 저장 (삭제 전):', undoStackRef.current.length);
+          console.log('🔄 Step 3 Redo stack 초기화');
+        } else {
+          console.log('⚠️ Step 3 삭제 전 저장 스킵 (currentHtmlRef:', !!currentHtmlRef.current, ', 동일:', currentHtmlRef.current === currentHtml, ')');
         }
         
         // 선택된 모든 요소 삭제
@@ -1336,6 +1539,15 @@ const Step3PreEdit: React.FC<{
         setSelectedElements([]);
         
         console.log('✅ 삭제 완료');
+        
+        // ⭐ 삭제 후 iframe에 포커스를 주어 키보드 단축키가 바로 작동하도록 함
+        setTimeout(() => {
+          if (iframe.contentWindow) {
+            iframe.contentWindow.focus();
+          }
+          iframe.focus();
+          console.log('🎯 Step 3 iframe에 포커스 설정');
+        }, 0);
       }
     }
   };
@@ -2781,6 +2993,9 @@ const Step5ParallelEdit: React.FC<{
   const componentClickHandlersRef = React.useRef<Map<HTMLElement, (e: Event) => void>>(new Map());
   // 링크 클릭 방지 핸들러 저장 (제거를 위해)
   const linkClickHandlersRef = React.useRef<Map<HTMLElement, (e: Event) => void>>(new Map());
+  // window 키보드 이벤트 리스너 저장 (cleanup에서 제거하기 위해)
+  const windowKeydownHandlerRef = React.useRef<((e: KeyboardEvent) => void) | null>(null);
+  const iframeKeydownHandlerRef = React.useRef<((e: KeyboardEvent) => void) | null>(null);
 
   // 패널 접기/펼치기
   const togglePanel = (panelId: string) => {
@@ -2840,12 +3055,14 @@ const Step5ParallelEdit: React.FC<{
     }
   }, [selectedHtml, collapsedPanels, fullscreenPanel]);
 
-  // 편집본 iframe 초기 렌더링 (NewTranslation 전용)
+  // 편집본 iframe 초기 렌더링 (NewTranslation 전용) - 한 번만 실행
   useEffect(() => {
+    if (isTranslatedInitialized) return; // 이미 초기화되었으면 스킵
+    
     const iframe = translatedIframeRef.current;
     if (!iframe || !translatedHtml) return;
 
-    console.log('📝 [NewTranslation Step5] 편집본 iframe 렌더링 시작, isTranslatedInitialized:', isTranslatedInitialized);
+    console.log('📝 [NewTranslation Step5] 편집본 iframe 초기 렌더링 시작');
     const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
 
     if (iframeDoc) {
@@ -2853,7 +3070,7 @@ const Step5ParallelEdit: React.FC<{
         iframeDoc.open();
         iframeDoc.write(translatedHtml);
         iframeDoc.close();
-        console.log('✅ [NewTranslation Step5] 편집본 iframe 렌더링 완료');
+        console.log('✅ [NewTranslation Step5] 편집본 iframe 초기 렌더링 완료');
       } catch (error) {
         console.warn('translated iframe write error (ignored):', error);
       }
@@ -2866,15 +3083,13 @@ const Step5ParallelEdit: React.FC<{
         }, true);
       }
 
-      if (!isTranslatedInitialized) {
-        // 초기 HTML을 currentHtmlRef에 저장
-        currentHtmlRef.current = translatedHtml;
-        undoStackRef.current = [];
-        redoStackRef.current = [];
-        setIsTranslatedInitialized(true);
-      }
+      // 초기 HTML을 currentHtmlRef에 저장
+      currentHtmlRef.current = translatedHtml;
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      setIsTranslatedInitialized(true);
     }
-  }, [translatedHtml, collapsedPanels, fullscreenPanel, isTranslatedInitialized]);
+  }, [translatedHtml]); // ⭐ Step 3처럼 한 번만 실행 (isTranslatedInitialized 체크로 중복 방지)
 
   // 편집본 편집 모드 처리 (NewTranslation 전용)
   useEffect(() => {
@@ -3049,43 +3264,21 @@ const Step5ParallelEdit: React.FC<{
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
           e.stopImmediatePropagation();
-          
-          // ⭐ 포커스 확인
-          const activeElement = iframeDoc.activeElement;
-          if (!activeElement || activeElement === iframeDoc.body) {
-            iframeDoc.body.focus();
-          }
-          
-          const success = iframeDoc.execCommand('undo', false);
-          if (success) {
+          iframeDoc.execCommand('undo', false);
           const updatedHtml = iframeDoc.documentElement.outerHTML;
-            currentHtmlRef.current = updatedHtml;
+          currentHtmlRef.current = updatedHtml;
           onTranslatedChange(updatedHtml);
           console.log('↩️ Undo (STEP 5 텍스트 편집)');
-          } else {
-            console.warn('⚠️ execCommand undo 실패 (키보드 단축키)');
-          }
         }
         // Cmd+Shift+Z (Mac) 또는 Ctrl+Y (Windows) - Redo
         else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
           e.preventDefault();
           e.stopImmediatePropagation();
-          
-          // ⭐ 포커스 확인
-          const activeElement = iframeDoc.activeElement;
-          if (!activeElement || activeElement === iframeDoc.body) {
-            iframeDoc.body.focus();
-          }
-          
-          const success = iframeDoc.execCommand('redo', false);
-          if (success) {
+          iframeDoc.execCommand('redo', false);
           const updatedHtml = iframeDoc.documentElement.outerHTML;
-            currentHtmlRef.current = updatedHtml;
+          currentHtmlRef.current = updatedHtml;
           onTranslatedChange(updatedHtml);
           console.log('↪️ Redo (STEP 5 텍스트 편집)');
-          } else {
-            console.warn('⚠️ execCommand redo 실패 (키보드 단축키)');
-          }
         }
         
         // ⭐ 백스페이스 키 처리 (브라우저 기본 동작 허용) - Step 3와 동일
@@ -3095,7 +3288,14 @@ const Step5ParallelEdit: React.FC<{
         }
       };
       
+      // 기존 리스너 제거
+      if (iframeKeydownHandlerRef.current && iframeDoc) {
+        iframeDoc.removeEventListener('keydown', iframeKeydownHandlerRef.current, true);
+      }
+      // 새 리스너 등록 및 저장
+      iframeKeydownHandlerRef.current = handleKeyDown;
       iframeDoc.addEventListener('keydown', handleKeyDown, true);
+      console.log('✅ Step 5 텍스트 모드 키보드 단축키 등록 완료');
       
       // ⚡ 최적화: input 이벤트 디바운스 (메모리 사용 감소)
       let inputTimeoutId: NodeJS.Timeout | null = null;
@@ -3247,6 +3447,7 @@ const Step5ParallelEdit: React.FC<{
 
       // Cmd+Z / Cmd+Y 지원 (컴포넌트 편집 모드) - 커스텀 Undo Stack 사용
       const handleKeydown = (e: KeyboardEvent) => {
+        console.log('🔑 Step 5 iframe 키 감지:', e.key, 'ctrl:', e.ctrlKey, 'meta:', e.metaKey, 'shift:', e.shiftKey);
         // Cmd+Z (Mac) 또는 Ctrl+Z (Windows) - Undo
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
           e.preventDefault(); // ⭐ 항상 preventDefault 호출 (undo stack이 비어있어도 시스템 단축키 방지)
@@ -3270,7 +3471,11 @@ const Step5ParallelEdit: React.FC<{
             onTranslatedChange(previousHtml);
             setSelectedElements([]);
             
-            // ⭐ translatedHtml이 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨 (Step 3 방식)
+            // 컴포넌트 편집 모드 다시 초기화 - iframe을 다시 쓴 후 이벤트 핸들러 재등록을 위해 모드 재설정
+            setTimeout(() => {
+              setMode('text');
+              setTimeout(() => setMode('component'), 0);
+            }, 10);
           } else {
             console.log('⚠️ Undo stack이 비어있습니다 (STEP 5)');
             // ⭐ undo stack이 비어있어도 preventDefault는 이미 호출됨 (시스템 단축키 방지)
@@ -3299,24 +3504,91 @@ const Step5ParallelEdit: React.FC<{
             onTranslatedChange(nextHtml);
             setSelectedElements([]);
             
-            // ⭐ translatedHtml이 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨 (Step 3 방식)
+            // 컴포넌트 편집 모드 다시 초기화 - iframe을 다시 쓴 후 이벤트 핸들러 재등록을 위해 모드 재설정
+            setTimeout(() => {
+              setMode('text');
+              setTimeout(() => setMode('component'), 0);
+            }, 10);
           } else {
             console.log('⚠️ Redo stack이 비어있습니다');
             // ⭐ redo stack이 비어있어도 preventDefault는 이미 호출됨 (시스템 단축키 방지)
           }
         }
       };
-      // capture 단계에서 이벤트 잡기 (맥에서 시스템 단축키보다 먼저 실행)
-      iframeDoc.addEventListener('keydown', handleKeydown, true);
       
-      // 부모 window에서도 이벤트 잡기
+      // 기존 iframe 리스너 제거
+      if (iframeKeydownHandlerRef.current && iframeDoc) {
+        iframeDoc.removeEventListener('keydown', iframeKeydownHandlerRef.current, true);
+      }
+      // 새 iframe 리스너 등록 및 저장
+      iframeKeydownHandlerRef.current = handleKeydown;
+      iframeDoc.addEventListener('keydown', handleKeydown, true);
+      console.log('✅ Step 5 컴포넌트 모드 키보드 단축키 등록 완료 (iframe)');
+      
+      // 부모 window에서도 이벤트 잡기 (iframe 포커스가 없을 때 대비)
       const handleWindowKeydown = (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'y')) {
+        console.log('🔑 Step 5 window 키 감지:', e.key, 'ctrl:', e.ctrlKey, 'meta:', e.metaKey, 'shift:', e.shiftKey);
+        
+        // Ctrl+Z (되돌리기)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
           e.stopImmediatePropagation();
+          
+          if (undoStackRef.current.length > 0 && iframeDoc) {
+            console.log('↩️ Undo (Step 5 컴포넌트 편집 - window)');
+            
+            redoStackRef.current.push(currentHtmlRef.current);
+            const previousHtml = undoStackRef.current.pop()!;
+            currentHtmlRef.current = previousHtml;
+            
+            iframeDoc.open();
+            iframeDoc.write(previousHtml);
+            iframeDoc.close();
+            
+            onTranslatedChange(previousHtml);
+            setSelectedElements([]);
+            
+            setTimeout(() => {
+              setMode('text');
+              setTimeout(() => setMode('component'), 0);
+            }, 10);
+          }
+        }
+        // Ctrl+Shift+Z 또는 Ctrl+Y (다시 실행)
+        else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          
+          if (redoStackRef.current.length > 0 && iframeDoc) {
+            console.log('↪️ Redo (Step 5 컴포넌트 편집 - window)');
+            
+            undoStackRef.current.push(currentHtmlRef.current);
+            const nextHtml = redoStackRef.current.pop()!;
+            currentHtmlRef.current = nextHtml;
+            
+            iframeDoc.open();
+            iframeDoc.write(nextHtml);
+            iframeDoc.close();
+            
+            onTranslatedChange(nextHtml);
+            setSelectedElements([]);
+            
+            setTimeout(() => {
+              setMode('text');
+              setTimeout(() => setMode('component'), 0);
+            }, 10);
+          }
         }
       };
+      
+      // 기존 window 리스너 제거
+      if (windowKeydownHandlerRef.current) {
+        window.removeEventListener('keydown', windowKeydownHandlerRef.current, true);
+      }
+      // 새 window 리스너 등록 및 저장
+      windowKeydownHandlerRef.current = handleWindowKeydown;
       window.addEventListener('keydown', handleWindowKeydown, true);
+      console.log('✅ Step 5 window 키보드 이벤트 리스너 등록 완료');
 
       // 컴포넌트 클릭 핸들러 (다중 선택 + 토글)
       const handleComponentClick = (e: Event) => {
@@ -3396,9 +3668,15 @@ const Step5ParallelEdit: React.FC<{
     }
 
     return () => {
-      // 클린업: 이벤트 리스너는 모드 변경 시 제거됨
+      console.log('🧹 Step 5 cleanup: 이벤트 리스너 제거');
+      // window 리스너 제거
+      if (windowKeydownHandlerRef.current) {
+        window.removeEventListener('keydown', windowKeydownHandlerRef.current, true);
+        console.log('✅ Step 5 window 키보드 리스너 제거');
+      }
+      // iframe 리스너는 모드 전환 시 자동으로 제거됨 (DOM이 재설정되므로)
     };
-  }, [mode, isTranslatedInitialized, translatedHtml]); // ⭐ Step 3 방식: translatedHtml 추가하여 undo/redo 후 자동 재활성화
+  }, [mode, isTranslatedInitialized]); // ⭐ Step 3 방식: translatedHtml 제거 (iframe 재렌더링 없이 모드만 변경)
 
   // 컴포넌트 삭제
   const handleDelete = () => {
@@ -3431,9 +3709,20 @@ const Step5ParallelEdit: React.FC<{
 
     console.log('✅ 삭제 완료 (STEP 5)');
     
+    // ⭐ 삭제 후 iframe에 포커스를 주어 키보드 단축키가 바로 작동하도록 함
+    setTimeout(() => {
+      if (iframe.contentWindow) {
+        iframe.contentWindow.focus();
+      }
+      iframe.focus();
+      console.log('🎯 Step 5 iframe에 포커스 설정');
+    }, 0);
+    
     // ⭐ 삭제 후 컴포넌트 편집 모드 재활성화 (이벤트 리스너 재등록)
-    setMode('text');
-    setTimeout(() => setMode('component'), 0);
+    setTimeout(() => {
+      setMode('text');
+      setTimeout(() => setMode('component'), 0);
+    }, 10);
   };
 
   // 패널 정의
@@ -3603,31 +3892,23 @@ const Step5ParallelEdit: React.FC<{
                                   onTranslatedChange(previousHtml);
                                   setSelectedElements([]);
                                   
-                                  // ⭐ translatedHtml이 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨 (Step 3 방식)
+                                  // 컴포넌트 편집 모드 다시 초기화 - iframe을 다시 쓴 후 이벤트 핸들러 재등록을 위해 모드 재설정
+                                  setTimeout(() => {
+                                    setMode('text');
+                                    setTimeout(() => setMode('component'), 0);
+                                  }, 10);
+                                  
                                   console.log('↶ Step 5 컴포넌트 편집 실행 취소 완료. 남은 undo:', undoStackRef.current.length);
                                 } else {
                                   console.log('⚠️ Step 5 컴포넌트 편집 undo stack이 비어있습니다');
-                                  // ⭐ undo stack이 비어있어도 아무 동작 안 함 (시스템 단축키 실행 방지)
                                 }
                               } else if (mode === 'text') {
                                 // 텍스트 편집 모드: 브라우저 기본 undo 사용 (텍스트 변경만)
-                                // ⭐ 포커스가 iframe 내부에 있는지 확인
-                                const activeElement = iframeDoc.activeElement;
-                                if (!activeElement || activeElement === iframeDoc.body) {
-                                  // 포커스가 없으면 body에 포커스
-                                  iframeDoc.body.focus();
-                                }
-                                
-                                // execCommand 실행
-                                const success = iframeDoc.execCommand('undo', false);
-                                if (success) {
+                                iframeDoc.execCommand('undo', false);
                                 const updatedHtml = iframeDoc.documentElement.outerHTML;
-                                  currentHtmlRef.current = updatedHtml;
+                                currentHtmlRef.current = updatedHtml;
                                 onTranslatedChange(updatedHtml);
-                                  console.log('↶ Step 5 텍스트 편집 실행 취소 완료 (브라우저 기본 undo)');
-                                } else {
-                                  console.warn('⚠️ execCommand undo 실패 - 브라우저 undo history가 없을 수 있습니다');
-                                }
+                                console.log('↶ Step 5 텍스트 편집 실행 취소 완료 (브라우저 기본 undo)');
                               }
                             }}
                             style={{ fontSize: '11px', padding: '4px 8px' }}
@@ -3663,11 +3944,15 @@ const Step5ParallelEdit: React.FC<{
                                   onTranslatedChange(nextHtml);
                                   setSelectedElements([]);
                                   
-                                  // ⭐ translatedHtml이 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨 (Step 3 방식)
+                                  // 컴포넌트 편집 모드 다시 초기화 - iframe을 다시 쓴 후 이벤트 핸들러 재등록을 위해 모드 재설정
+                                  setTimeout(() => {
+                                    setMode('text');
+                                    setTimeout(() => setMode('component'), 0);
+                                  }, 10);
+                                  
                                   console.log('↷ Step 5 컴포넌트 편집 다시 실행 완료. 남은 redo:', redoStackRef.current.length);
                                 } else {
                                   console.log('⚠️ Step 5 컴포넌트 편집 redo stack이 비어있습니다');
-                                  // ⭐ redo stack이 비어있어도 아무 동작 안 함 (시스템 단축키 실행 방지)
                                 }
                               } else if (mode === 'text') {
                                 // 텍스트 편집 모드: 브라우저 기본 redo 사용 (텍스트 변경만)
