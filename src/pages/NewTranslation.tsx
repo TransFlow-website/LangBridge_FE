@@ -896,11 +896,13 @@ const Step3PreEdit: React.FC<{
             onHtmlChange(previousHtml);
             setSelectedElements([]);
             
-            // 컴포넌트 편집 모드 다시 활성화
+            // ⭐ html 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
             setTimeout(() => {
-              setMode('text');
-              setTimeout(() => setMode('component'), 0);
-            }, 10);
+              if (iframeDoc.body) {
+                iframeDoc.body.focus();
+              }
+            }, 50);
           } else {
             console.log('⚠️ Step 3 컴포넌트 Undo stack이 비어있습니다');
           }
@@ -928,11 +930,13 @@ const Step3PreEdit: React.FC<{
             onHtmlChange(nextHtml);
             setSelectedElements([]);
             
-            // 컴포넌트 편집 모드 다시 활성화
+            // ⭐ html 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
             setTimeout(() => {
-              setMode('text');
-              setTimeout(() => setMode('component'), 0);
-            }, 10);
+              if (iframeDoc.body) {
+                iframeDoc.body.focus();
+              }
+            }, 50);
           } else {
             console.log('⚠️ Step 3 컴포넌트 Redo stack이 비어있습니다');
           }
@@ -973,10 +977,7 @@ const Step3PreEdit: React.FC<{
             onHtmlChange(previousHtml);
             setSelectedElements([]);
             
-            setTimeout(() => {
-              setMode('text');
-              setTimeout(() => setMode('component'), 0);
-            }, 10);
+            // ⭐ html 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
           }
         }
         // Ctrl+Shift+Z 또는 Ctrl+Y (다시 실행)
@@ -1001,10 +1002,7 @@ const Step3PreEdit: React.FC<{
             onHtmlChange(nextHtml);
             setSelectedElements([]);
             
-            setTimeout(() => {
-              setMode('text');
-              setTimeout(() => setMode('component'), 0);
-            }, 10);
+            // ⭐ html 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
           } else {
             console.log('⚠️ Step 3 Redo stack이 비어있음 (window)');
           }
@@ -1239,7 +1237,7 @@ const Step3PreEdit: React.FC<{
       }
       // iframe 리스너는 모드 전환 시 자동으로 제거됨 (DOM이 재설정되므로)
     };
-  }, [mode, isInitialized]);
+  }, [mode, isInitialized, html]); // ⭐ html 추가하여 undo/redo 후 자동 재활성화
 
   // 초기 렌더링만 수행 (한 번만 실행)
   useEffect(() => {
@@ -1542,12 +1540,17 @@ const Step3PreEdit: React.FC<{
         
         // ⭐ 삭제 후 iframe에 포커스를 주어 키보드 단축키가 바로 작동하도록 함
         setTimeout(() => {
+          // body에 tabIndex 설정하여 포커스 가능하게 만들기
+          if (iframeDoc.body) {
+            iframeDoc.body.setAttribute('tabindex', '-1');
+            iframeDoc.body.focus();
+          }
           if (iframe.contentWindow) {
             iframe.contentWindow.focus();
           }
           iframe.focus();
           console.log('🎯 Step 3 iframe에 포커스 설정');
-        }, 0);
+        }, 100);
       }
     }
   };
@@ -3083,13 +3086,13 @@ const Step5ParallelEdit: React.FC<{
         }, true);
       }
 
-      // 초기 HTML을 currentHtmlRef에 저장
-      currentHtmlRef.current = translatedHtml;
-      undoStackRef.current = [];
-      redoStackRef.current = [];
-      setIsTranslatedInitialized(true);
-    }
-  }, [translatedHtml]); // ⭐ Step 3처럼 한 번만 실행 (isTranslatedInitialized 체크로 중복 방지)
+        // 초기 HTML을 currentHtmlRef에 저장
+        currentHtmlRef.current = translatedHtml;
+        undoStackRef.current = [];
+        redoStackRef.current = [];
+        setIsTranslatedInitialized(true);
+      }
+  }); // ⭐ Step 3 방식: 의존성 배열 제거하여 translatedHtml 변경 시 트리거되지 않도록 함
 
   // 편집본 편집 모드 처리 (NewTranslation 전용)
   useEffect(() => {
@@ -3471,11 +3474,15 @@ const Step5ParallelEdit: React.FC<{
             onTranslatedChange(previousHtml);
             setSelectedElements([]);
             
-            // 컴포넌트 편집 모드 다시 초기화 - iframe을 다시 쓴 후 이벤트 핸들러 재등록을 위해 모드 재설정
+            // ⭐ translatedHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
             setTimeout(() => {
-              setMode('text');
-              setTimeout(() => setMode('component'), 0);
-            }, 10);
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (newIframeDoc?.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
+              }
+            }, 50);
           } else {
             console.log('⚠️ Undo stack이 비어있습니다 (STEP 5)');
             // ⭐ undo stack이 비어있어도 preventDefault는 이미 호출됨 (시스템 단축키 방지)
@@ -3504,11 +3511,15 @@ const Step5ParallelEdit: React.FC<{
             onTranslatedChange(nextHtml);
             setSelectedElements([]);
             
-            // 컴포넌트 편집 모드 다시 초기화 - iframe을 다시 쓴 후 이벤트 핸들러 재등록을 위해 모드 재설정
+            // ⭐ translatedHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
             setTimeout(() => {
-              setMode('text');
-              setTimeout(() => setMode('component'), 0);
-            }, 10);
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (newIframeDoc?.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
+              }
+            }, 50);
           } else {
             console.log('⚠️ Redo stack이 비어있습니다');
             // ⭐ redo stack이 비어있어도 preventDefault는 이미 호출됨 (시스템 단축키 방지)
@@ -3548,10 +3559,15 @@ const Step5ParallelEdit: React.FC<{
             onTranslatedChange(previousHtml);
             setSelectedElements([]);
             
+            // ⭐ translatedHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
             setTimeout(() => {
-              setMode('text');
-              setTimeout(() => setMode('component'), 0);
-            }, 10);
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (newIframeDoc?.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
+              }
+            }, 50);
           }
         }
         // Ctrl+Shift+Z 또는 Ctrl+Y (다시 실행)
@@ -3573,10 +3589,15 @@ const Step5ParallelEdit: React.FC<{
             onTranslatedChange(nextHtml);
             setSelectedElements([]);
             
+            // ⭐ translatedHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
             setTimeout(() => {
-              setMode('text');
-              setTimeout(() => setMode('component'), 0);
-            }, 10);
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (newIframeDoc?.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
+              }
+            }, 50);
           }
         }
       };
@@ -3711,18 +3732,17 @@ const Step5ParallelEdit: React.FC<{
     
     // ⭐ 삭제 후 iframe에 포커스를 주어 키보드 단축키가 바로 작동하도록 함
     setTimeout(() => {
+      // body에 tabIndex 설정하여 포커스 가능하게 만들기
+      if (iframeDoc.body) {
+        iframeDoc.body.setAttribute('tabindex', '-1');
+        iframeDoc.body.focus();
+      }
       if (iframe.contentWindow) {
         iframe.contentWindow.focus();
       }
       iframe.focus();
       console.log('🎯 Step 5 iframe에 포커스 설정');
-    }, 0);
-    
-    // ⭐ 삭제 후 컴포넌트 편집 모드 재활성화 (이벤트 리스너 재등록)
-    setTimeout(() => {
-      setMode('text');
-      setTimeout(() => setMode('component'), 0);
-    }, 10);
+    }, 100);
   };
 
   // 패널 정의
@@ -3892,11 +3912,15 @@ const Step5ParallelEdit: React.FC<{
                                   onTranslatedChange(previousHtml);
                                   setSelectedElements([]);
                                   
-                                  // 컴포넌트 편집 모드 다시 초기화 - iframe을 다시 쓴 후 이벤트 핸들러 재등록을 위해 모드 재설정
+                                  // ⭐ translatedHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+                                  // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
                                   setTimeout(() => {
-                                    setMode('text');
-                                    setTimeout(() => setMode('component'), 0);
-                                  }, 10);
+                                    const newIframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
+                                    if (newIframeDoc?.body) {
+                                      newIframeDoc.body.setAttribute('tabindex', '-1');
+                                      newIframeDoc.body.focus();
+                                    }
+                                  }, 50);
                                   
                                   console.log('↶ Step 5 컴포넌트 편집 실행 취소 완료. 남은 undo:', undoStackRef.current.length);
                                 } else {
@@ -3944,11 +3968,15 @@ const Step5ParallelEdit: React.FC<{
                                   onTranslatedChange(nextHtml);
                                   setSelectedElements([]);
                                   
-                                  // 컴포넌트 편집 모드 다시 초기화 - iframe을 다시 쓴 후 이벤트 핸들러 재등록을 위해 모드 재설정
+                                  // ⭐ translatedHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+                                  // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
                                   setTimeout(() => {
-                                    setMode('text');
-                                    setTimeout(() => setMode('component'), 0);
-                                  }, 10);
+                                    const newIframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
+                                    if (newIframeDoc?.body) {
+                                      newIframeDoc.body.setAttribute('tabindex', '-1');
+                                      newIframeDoc.body.focus();
+                                    }
+                                  }, 50);
                                   
                                   console.log('↷ Step 5 컴포넌트 편집 다시 실행 완료. 남은 redo:', redoStackRef.current.length);
                                 } else {
