@@ -61,6 +61,12 @@ export default function TranslationWork() {
   const redoStackRef = useRef<string[]>([]);
   const currentEditorHtmlRef = useRef<string>('');
   
+  // 이벤트 핸들러 저장 (제거를 위해)
+  const componentClickHandlersRef = useRef<Map<HTMLElement, (e: Event) => void>>(new Map());
+  const linkClickHandlersRef = useRef<Map<HTMLElement, (e: Event) => void>>(new Map());
+  const windowKeydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
+  const iframeKeydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
+  
   // iframe 렌더링 상태 추적
   const hasRenderedMyTranslation = useRef(false);
   
@@ -391,6 +397,8 @@ export default function TranslationWork() {
 
   // 내 번역 iframe 렌더링 (HTML 구조 보존) + 약한 연동
   useEffect(() => {
+    if (isTranslationEditorInitialized) return; // 이미 초기화되었으면 스킵
+    
     const iframe = myTranslationIframeRef.current;
     if (!iframe || !savedTranslationHtml) return;
 
@@ -449,7 +457,7 @@ export default function TranslationWork() {
         setIsTranslationEditorInitialized(true);
       }
     }
-  }, [savedTranslationHtml, collapsedPanels, fullscreenPanel, isTranslationEditorInitialized]);
+  }); // ⭐ Step 5 방식: 의존성 배열 제거하여 savedTranslationHtml 변경 시 트리거되지 않도록 함 (한 번만 실행)
 
 
   // 편집 모드 처리 (텍스트/컴포넌트)
@@ -475,42 +483,170 @@ export default function TranslationWork() {
 
     if (editorMode === 'text') {
       // 텍스트 편집 모드
-      console.log('📝 텍스트 편집 모드 활성화');
+      console.log('📝 [TranslationWork] 텍스트 편집 모드 활성화');
 
-      // ⭐ 텍스트 편집 모드: 경계선 완전 제거
-      const textModeStyle = iframeDoc.createElement('style');
-      textModeStyle.id = 'text-mode-styles';
-      textModeStyle.textContent = `
+      // ⭐ 컴포넌트 클릭 핸들러 제거
+      componentClickHandlersRef.current.forEach((handler, el) => {
+        el.removeEventListener('click', handler, true);
+      });
+      componentClickHandlersRef.current.clear();
+
+      // ⭐ 모든 요소의 검은색 테두리 제거 (computed style 기반)
+      const allElements = iframeDoc.querySelectorAll('*');
+      allElements.forEach(el => {
+        const htmlEl = el as HTMLElement;
+        const computedStyle = iframeDoc.defaultView?.getComputedStyle(htmlEl);
+        if (computedStyle) {
+          const outline = computedStyle.outline;
+          const outlineColor = computedStyle.outlineColor;
+          if (outline && outline !== 'none' && (
+            outlineColor === 'rgb(0, 0, 0)' || 
+            outlineColor === '#000000' || 
+            outlineColor === 'black' ||
+            outline.includes('3px solid') ||
+            outline.includes('black')
+          )) {
+            htmlEl.style.outline = '';
+            htmlEl.style.outlineOffset = '';
+          }
+        }
+        if (htmlEl.style.outline && (
+          htmlEl.style.outline.includes('3px solid') ||
+          htmlEl.style.outline.includes('black') ||
+          htmlEl.style.outline.includes('#000')
+        )) {
+          htmlEl.style.outline = '';
+        }
+        htmlEl.classList.remove('component-selected');
+        htmlEl.removeAttribute('data-component-editable');
+      });
+
+      // ⭐ 컴포넌트 선택 스타일 제거
+      const editorStyles = iframeDoc.getElementById('editor-styles');
+      if (editorStyles) {
+        editorStyles.remove();
+      }
+
+      // ⭐ 컴포넌트 선택 스타일을 완전히 무효화하는 CSS 추가
+      const textEditOverrideStyle = iframeDoc.createElement('style');
+      textEditOverrideStyle.id = 'text-edit-override-styles';
+      textEditOverrideStyle.textContent = `
+        .component-selected,
+        [data-component-editable] {
+          outline: none !important;
+          box-shadow: none !important;
+          background-color: transparent !important;
+          outline-offset: 0 !important;
+        }
         * {
-          border: none !important;
+          outline: none !important;
+        }
+        *:focus {
           outline: none !important;
         }
       `;
-      iframeDoc.head.appendChild(textModeStyle);
+      const existingOverride = iframeDoc.getElementById('text-edit-override-styles');
+      if (existingOverride) {
+        existingOverride.remove();
+      }
+      iframeDoc.head.appendChild(textEditOverrideStyle);
 
-      // contentEditable 설정
-      const textElements = iframeDoc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, span, a, li, td, th, label, button');
-      textElements.forEach(el => {
+      // ⭐ contentEditable 설정 (cross-element selection을 위해)
+      if (iframeDoc.body) {
+        iframeDoc.body.contentEditable = 'true';
+        iframeDoc.body.style.cursor = 'text';
+      }
+
+      // 모든 텍스트 요소를 편집 가능하게
+      const editableElements = iframeDoc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, span, div, li, td, th, label, a, button, article, section, header, footer, main, aside');
+      editableElements.forEach((el) => {
+        if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(el.tagName)) {
         (el as HTMLElement).contentEditable = 'true';
         (el as HTMLElement).style.cursor = 'text';
+        }
       });
 
-      const containerElements = iframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, ul, ol, table');
-      containerElements.forEach(el => {
+      // 스크립트, 스타일 태그는 편집 불가능하게
+      const scripts = iframeDoc.querySelectorAll('script, style, noscript');
+      scripts.forEach((el) => {
         (el as HTMLElement).contentEditable = 'false';
-        (el as HTMLElement).style.cursor = 'default';
       });
 
-      // Cmd+Z (Mac) / Ctrl+Z (Windows) 지원
-      const handleKeydown = (e: KeyboardEvent) => {
+      // ⭐ user-select 스타일 추가 (cross-element selection)
+      const textEditStyle = iframeDoc.createElement('style');
+      textEditStyle.id = 'text-edit-styles';
+      textEditStyle.textContent = `
+        body, * {
+          user-select: text !important;
+          -webkit-user-select: text !important;
+          cursor: text !important;
+        }
+      `;
+      const existingTextStyle = iframeDoc.getElementById('text-edit-styles');
+      if (existingTextStyle) {
+        existingTextStyle.remove();
+      }
+      iframeDoc.head.appendChild(textEditStyle);
+
+      // ⭐ currentEditorHtmlRef 초기화 (텍스트 편집 모드)
+      const initialHtml = iframeDoc.documentElement.outerHTML;
+      currentEditorHtmlRef.current = initialHtml;
+      console.log('💾 TranslationWork 텍스트 편집 모드 currentEditorHtmlRef 초기화 완료');
+
+      // ⭐ 링크 클릭 방지 (다른 사이트로 이동 방지)
+      // 기존 링크 클릭 핸들러 제거
+      linkClickHandlersRef.current.forEach((handler, link) => {
+        link.removeEventListener('click', handler, true);
+      });
+      linkClickHandlersRef.current.clear();
+
+      // 모든 링크에 클릭 방지 핸들러 추가
+      const allLinks = iframeDoc.querySelectorAll('a');
+      const preventLinkNavigation = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        return false;
+      };
+
+      allLinks.forEach(link => {
+        const htmlLink = link as HTMLElement;
+        htmlLink.addEventListener('click', preventLinkNavigation, true);
+        linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
+        // 링크 스타일 변경 (편집 모드임을 표시)
+        htmlLink.style.cursor = 'text';
+        htmlLink.style.textDecoration = 'none';
+      });
+
+      // 링크 스타일 CSS 추가
+      const linkStyle = iframeDoc.createElement('style');
+      linkStyle.id = 'text-edit-link-style';
+      linkStyle.textContent = `
+        a {
+          cursor: text !important;
+          pointer-events: auto !important;
+        }
+        a:hover {
+          text-decoration: underline !important;
+        }
+      `;
+      const existingLinkStyle = iframeDoc.getElementById('text-edit-link-style');
+      if (existingLinkStyle) {
+        existingLinkStyle.remove();
+      }
+      iframeDoc.head.appendChild(linkStyle);
+
+      // ⭐ Step 5와 동일한 방식으로 키보드 이벤트 처리
+      const handleKeyDown = (e: KeyboardEvent) => {
         // Cmd+Z (Mac) 또는 Ctrl+Z (Windows) - Undo
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
           e.stopImmediatePropagation();
           iframeDoc.execCommand('undo', false);
           const updatedHtml = iframeDoc.documentElement.outerHTML;
-          setSavedTranslationHtml(updatedHtml);
-          console.log('↩️ Undo');
+          currentEditorHtmlRef.current = updatedHtml;
+          // ⭐ setSavedTranslationHtml 제거 - Step 5와 동일하게 useEffect 재트리거 방지
+          console.log('↩️ Undo (TranslationWork 텍스트 편집)');
         }
         // Cmd+Shift+Z (Mac) 또는 Ctrl+Y (Windows) - Redo
         else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
@@ -518,23 +654,29 @@ export default function TranslationWork() {
           e.stopImmediatePropagation();
           iframeDoc.execCommand('redo', false);
           const updatedHtml = iframeDoc.documentElement.outerHTML;
-          setSavedTranslationHtml(updatedHtml);
-          console.log('↪️ Redo');
+          currentEditorHtmlRef.current = updatedHtml;
+          // ⭐ setSavedTranslationHtml 제거 - Step 5와 동일하게 useEffect 재트리거 방지
+          console.log('↪️ Redo (TranslationWork 텍스트 편집)');
+        }
+
+        // ⭐ 백스페이스 키 처리 (브라우저 기본 동작 허용)
+        if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          // 브라우저가 알아서 처리하게 놔둠
+          console.log('⌫ 백스페이스 (TranslationWork 텍스트 편집)');
         }
       };
-      // capture 단계에서 이벤트 잡기
-      iframeDoc.addEventListener('keydown', handleKeydown, true);
-      
-      // 부모 window에서도 이벤트 잡기 (맥 시스템 단축키 방지)
-      window.addEventListener('keydown', (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'y')) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
-      }, true);
+
+      // 기존 iframe 리스너 제거
+      if (iframeKeydownHandlerRef.current && iframeDoc) {
+        iframeDoc.removeEventListener('keydown', iframeKeydownHandlerRef.current, true);
+      }
+      // 새 iframe 리스너 등록 및 저장
+      iframeKeydownHandlerRef.current = handleKeyDown;
+      iframeDoc.addEventListener('keydown', handleKeyDown, true);
+      console.log('✅ TranslationWork 텍스트 모드 키보드 단축키 등록 완료 (iframe)');
 
       // ⚡ 최적화: input 이벤트 디바운스 (메모리 사용 감소)
-      let inputTimeoutId: NodeJS.Timeout | null = null;
+      let inputTimeoutId: ReturnType<typeof setTimeout> | null = null;
       const handleInput = () => {
         // 기존 타이머 취소
         if (inputTimeoutId) {
@@ -552,7 +694,62 @@ export default function TranslationWork() {
 
     } else if (editorMode === 'component') {
       // 컴포넌트 편집 모드
-      console.log('🧩 컴포넌트 편집 모드 활성화');
+      console.log('🧩 [TranslationWork] 컴포넌트 편집 모드 활성화');
+
+      // ⭐ 1. 브라우저 텍스트 선택 초기화
+      const selection = iframeDoc.defaultView?.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+      }
+
+      // ⭐ 2. selectedElements state 초기화
+      setSelectedElements([]);
+
+      // ⭐ 3. 모든 .component-selected 클래스 제거 및 기존 핸들러 제거
+      const existingSelected = iframeDoc.querySelectorAll('.component-selected');
+      existingSelected.forEach(el => {
+        const htmlEl = el as HTMLElement;
+        htmlEl.classList.remove('component-selected');
+        htmlEl.style.outline = '';
+        htmlEl.style.boxShadow = '';
+        htmlEl.style.backgroundColor = '';
+        htmlEl.style.outlineOffset = '';
+
+        // 기존 핸들러 제거
+        const handler = componentClickHandlersRef.current.get(htmlEl);
+        if (handler) {
+          htmlEl.removeEventListener('click', handler, true);
+          componentClickHandlersRef.current.delete(htmlEl);
+        }
+      });
+
+      // 모든 컴포넌트 클릭 핸들러 제거
+      componentClickHandlersRef.current.forEach((handler, el) => {
+        el.removeEventListener('click', handler, true);
+      });
+      componentClickHandlersRef.current.clear();
+
+      // ⭐ 4. 텍스트 편집 모드 스타일 태그 제거
+      const textEditOverrideStyle = iframeDoc.getElementById('text-edit-override-styles');
+      if (textEditOverrideStyle) {
+        textEditOverrideStyle.remove();
+      }
+      const textEditStyle = iframeDoc.getElementById('text-edit-styles');
+      if (textEditStyle) {
+        textEditStyle.remove();
+      }
+
+      // ⭐ 5. 링크 클릭 핸들러 제거
+      linkClickHandlersRef.current.forEach((handler, link) => {
+        link.removeEventListener('click', handler, true);
+      });
+      linkClickHandlersRef.current.clear();
+
+      // 링크 스타일 태그 제거
+      const linkStyle = iframeDoc.getElementById('text-edit-link-style');
+      if (linkStyle) {
+        linkStyle.remove();
+      }
 
       // contentEditable 비활성화
       const allEditableElements = iframeDoc.querySelectorAll('[contenteditable]');
@@ -560,31 +757,40 @@ export default function TranslationWork() {
         (el as HTMLElement).contentEditable = 'false';
       });
 
-      // 스타일 주입 (선택 가능한 요소 표시) - 컴포넌트 편집 모드에만 경계선 표시
+      // 스타일 추가
       const style = iframeDoc.createElement('style');
       style.id = 'editor-styles';
       style.textContent = `
-        div[data-component-editable], section[data-component-editable], article[data-component-editable],
-        header[data-component-editable], footer[data-component-editable], main[data-component-editable],
-        aside[data-component-editable], nav[data-component-editable], ul[data-component-editable],
-        ol[data-component-editable], table[data-component-editable], figure[data-component-editable],
-        blockquote[data-component-editable], form[data-component-editable] {
-          border: 1px dashed rgba(169, 169, 169, 0.5) !important;
+        div[data-component-editable],
+        section[data-component-editable],
+        article[data-component-editable],
+        header[data-component-editable],
+        footer[data-component-editable],
+        main[data-component-editable],
+        aside[data-component-editable],
+        nav[data-component-editable],
+        p[data-component-editable],
+        h1[data-component-editable],
+        h2[data-component-editable],
+        h3[data-component-editable],
+        h4[data-component-editable],
+        h5[data-component-editable],
+        h6[data-component-editable],
+        a[data-component-editable] {
+          outline: 1px dashed #C0C0C0 !important;
           cursor: pointer !important;
-          transition: border 150ms !important;
         }
-        div[data-component-editable]:hover, section[data-component-editable]:hover,
-        article[data-component-editable]:hover, header[data-component-editable]:hover,
-        footer[data-component-editable]:hover, main[data-component-editable]:hover,
-        aside[data-component-editable]:hover, nav[data-component-editable]:hover,
-        ul[data-component-editable]:hover, ol[data-component-editable]:hover,
-        table[data-component-editable]:hover, figure[data-component-editable]:hover,
-        blockquote[data-component-editable]:hover, form[data-component-editable]:hover {
-          border-color: rgba(105, 105, 105, 0.8) !important;
-          background-color: rgba(169, 169, 169, 0.05) !important;
+        div[data-component-editable]:hover,
+        section[data-component-editable]:hover,
+        article[data-component-editable]:hover,
+        p[data-component-editable]:hover,
+        h1[data-component-editable]:hover,
+        h2[data-component-editable]:hover,
+        h3[data-component-editable]:hover,
+        a[data-component-editable]:hover {
+          outline: 2px solid #808080 !important;
         }
-        [data-component-selected="true"] {
-          border: none !important;
+        .component-selected {
           outline: 4px solid #28a745 !important;
           outline-offset: 3px !important;
           background-color: rgba(40, 167, 69, 0.25) !important;
@@ -592,7 +798,7 @@ export default function TranslationWork() {
           position: relative !important;
           transition: all 0.2s ease !important;
         }
-        [data-component-selected="true"]::after {
+        .component-selected::after {
           content: '✓ 선택됨';
           position: fixed;
           top: 10px;
@@ -614,93 +820,257 @@ export default function TranslationWork() {
       `;
       iframeDoc.head.appendChild(style);
 
-      // 편집 가능한 요소에 data-component-editable 속성 추가
-      const editableComponents = iframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, ul, ol, table, figure, blockquote, form');
-      editableComponents.forEach(el => {
-        (el as HTMLElement).setAttribute('data-component-editable', 'true');
-      });
+      // 클릭 가능한 컴포넌트 표시 (a 태그도 포함)
+      const componentElements = iframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6, a');
 
-      // 클릭 이벤트 (다중 선택 지원)
-      const handleComponentClick = (e: MouseEvent) => {
-        const target = e.target as HTMLElement;
-        const editableEl = target.closest('[data-component-editable]') as HTMLElement;
-        if (!editableEl) return;
-
-        e.preventDefault();
-        e.stopPropagation();
-
-        const isSelected = editableEl.getAttribute('data-component-selected') === 'true';
-        
-        if (isSelected) {
-          // 이미 선택된 요소 클릭 → 선택 해제 (토글)
-          editableEl.removeAttribute('data-component-selected');
-          // 인라인 스타일 제거
-          editableEl.style.outline = '';
-          editableEl.style.outlineOffset = '';
-          editableEl.style.backgroundColor = '';
-          editableEl.style.boxShadow = '';
-          editableEl.style.border = '';
-          setSelectedElements(prev => prev.filter(el => el !== editableEl));
-          console.log('🔴 선택 해제:', editableEl.tagName);
-        } else {
-          // 선택되지 않은 요소 클릭 → 선택 추가
-          editableEl.setAttribute('data-component-selected', 'true');
-          // 인라인 스타일로 강제 적용 (CSS보다 우선순위 높음)
-          editableEl.style.border = 'none';
-          editableEl.style.outline = '4px solid #28a745';
-          editableEl.style.outlineOffset = '3px';
-          editableEl.style.backgroundColor = 'rgba(40, 167, 69, 0.25)';
-          editableEl.style.boxShadow = '0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5)';
-          editableEl.style.position = 'relative';
-          editableEl.style.transition = 'all 0.2s ease';
-          setSelectedElements(prev => [...prev, editableEl]);
-          console.log('🟢 선택 추가:', editableEl.tagName);
-        }
-      };
-      iframeDoc.body.addEventListener('click', handleComponentClick, true);
-
-      // Cmd+Z / Ctrl+Z - Custom Undo Stack
+      // Cmd+Z / Cmd+Y 지원 (컴포넌트 편집 모드) - 커스텀 Undo Stack 사용
       const handleKeydown = (e: KeyboardEvent) => {
+        console.log('🔑 TranslationWork iframe 키 감지:', e.key, 'ctrl:', e.ctrlKey, 'meta:', e.metaKey, 'shift:', e.shiftKey);
+        // Cmd+Z (Mac) 또는 Ctrl+Z (Windows) - Undo
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-          e.preventDefault();
+          e.preventDefault(); // ⭐ 항상 preventDefault 호출 (undo stack이 비어있어도 시스템 단축키 방지)
           e.stopImmediatePropagation();
+
           if (undoStackRef.current.length > 0) {
-            const previousHtml = undoStackRef.current.pop()!;
+            console.log('↩️ Undo (컴포넌트 편집) - stack:', undoStackRef.current.length);
+
+            // 현재 상태를 redo stack에 저장
             redoStackRef.current.push(currentEditorHtmlRef.current);
+
+            // undo stack에서 이전 상태 복원
+            const previousHtml = undoStackRef.current.pop()!;
             currentEditorHtmlRef.current = previousHtml;
-            // iframe 재렌더링
+
+            // iframe에 HTML 복원
             iframeDoc.open();
             iframeDoc.write(previousHtml);
             iframeDoc.close();
+
             setSavedTranslationHtml(previousHtml);
-            console.log('↩️ Undo (Component)');
+            setSelectedElements([]);
+
+            // ⭐ savedTranslationHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+            setTimeout(() => {
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (newIframeDoc?.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
+              }
+            }, 50);
+        } else {
+            console.log('⚠️ Undo stack이 비어있습니다 (TranslationWork)');
+            // ⭐ undo stack이 비어있어도 preventDefault는 이미 호출됨 (시스템 단축키 방지)
           }
         }
+        // Cmd+Shift+Z (Mac) 또는 Ctrl+Y (Windows) - Redo
         else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
-          e.preventDefault();
+          e.preventDefault(); // ⭐ 항상 preventDefault 호출 (redo stack이 비어있어도 시스템 단축키 방지)
           e.stopImmediatePropagation();
+
           if (redoStackRef.current.length > 0) {
-            const nextHtml = redoStackRef.current.pop()!;
+            console.log('↪️ Redo (컴포넌트 편집 TranslationWork) - stack:', redoStackRef.current.length);
+
+            // 현재 상태를 undo stack에 저장
             undoStackRef.current.push(currentEditorHtmlRef.current);
+
+            // redo stack에서 다음 상태 복원
+            const nextHtml = redoStackRef.current.pop()!;
             currentEditorHtmlRef.current = nextHtml;
-            // iframe 재렌더링
+
+            // iframe에 HTML 복원
             iframeDoc.open();
             iframeDoc.write(nextHtml);
             iframeDoc.close();
+
             setSavedTranslationHtml(nextHtml);
-            console.log('↪️ Redo (Component)');
+            setSelectedElements([]);
+
+            // ⭐ savedTranslationHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+            setTimeout(() => {
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (newIframeDoc?.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
+              }
+            }, 50);
+          } else {
+            console.log('⚠️ Redo stack이 비어있습니다');
+            // ⭐ redo stack이 비어있어도 preventDefault는 이미 호출됨 (시스템 단축키 방지)
           }
         }
       };
+
+      // 기존 iframe 리스너 제거
+      if (iframeKeydownHandlerRef.current && iframeDoc) {
+        iframeDoc.removeEventListener('keydown', iframeKeydownHandlerRef.current, true);
+      }
+      // 새 iframe 리스너 등록 및 저장
+      iframeKeydownHandlerRef.current = handleKeydown;
       iframeDoc.addEventListener('keydown', handleKeydown, true);
-      window.addEventListener('keydown', (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'y')) {
+      console.log('✅ TranslationWork 컴포넌트 모드 키보드 단축키 등록 완료 (iframe)');
+
+      // 부모 window에서도 이벤트 잡기 (iframe 포커스가 없을 때 대비)
+      const handleWindowKeydown = (e: KeyboardEvent) => {
+        console.log('🔑 TranslationWork window 키 감지:', e.key, 'ctrl:', e.ctrlKey, 'meta:', e.metaKey, 'shift:', e.shiftKey);
+
+        // Ctrl+Z (되돌리기)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
           e.stopImmediatePropagation();
+
+          if (undoStackRef.current.length > 0 && iframeDoc) {
+            console.log('↩️ Undo (TranslationWork 컴포넌트 편집 - window)');
+
+            redoStackRef.current.push(currentEditorHtmlRef.current);
+            const previousHtml = undoStackRef.current.pop()!;
+            currentEditorHtmlRef.current = previousHtml;
+
+            iframeDoc.open();
+            iframeDoc.write(previousHtml);
+            iframeDoc.close();
+
+            setSavedTranslationHtml(previousHtml);
+            setSelectedElements([]);
+
+            // ⭐ savedTranslationHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+            setTimeout(() => {
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (newIframeDoc?.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
+              }
+            }, 50);
+          }
         }
-      }, true);
+        // Ctrl+Shift+Z 또는 Ctrl+Y (다시 실행)
+        else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+
+          if (redoStackRef.current.length > 0 && iframeDoc) {
+            console.log('↪️ Redo (TranslationWork 컴포넌트 편집 - window)');
+
+            undoStackRef.current.push(currentEditorHtmlRef.current);
+            const nextHtml = redoStackRef.current.pop()!;
+            currentEditorHtmlRef.current = nextHtml;
+
+            iframeDoc.open();
+            iframeDoc.write(nextHtml);
+            iframeDoc.close();
+
+            setSavedTranslationHtml(nextHtml);
+            setSelectedElements([]);
+
+            // ⭐ savedTranslationHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+            setTimeout(() => {
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (newIframeDoc?.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
+              }
+            }, 50);
+          }
+        }
+      };
+
+      // 기존 window 리스너 제거
+      if (windowKeydownHandlerRef.current) {
+        window.removeEventListener('keydown', windowKeydownHandlerRef.current, true);
+      }
+      // 새 window 리스너 등록 및 저장
+      windowKeydownHandlerRef.current = handleWindowKeydown;
+      window.addEventListener('keydown', handleWindowKeydown, true);
+      console.log('✅ TranslationWork window 키보드 이벤트 리스너 등록 완료');
+
+      // 컴포넌트 클릭 핸들러 (다중 선택 + 토글)
+      const handleComponentClick = (e: Event) => {
+        e.stopPropagation();
+          e.preventDefault();
+
+        const target = e.target as HTMLElement;
+        if (!target || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(target.tagName)) return;
+
+        // ⭐ 링크 내부 요소를 클릭한 경우 가장 가까운 편집 가능한 요소 찾기
+        const editableElement = target.closest('[data-component-editable]') as HTMLElement;
+        if (!editableElement) {
+          console.log('⚠️ 편집 가능한 요소를 찾을 수 없습니다:', target.tagName);
+          return;
+        }
+
+        const isSelected = editableElement.classList.contains('component-selected');
+
+        if (isSelected) {
+          editableElement.classList.remove('component-selected');
+          editableElement.style.outline = '1px dashed #C0C0C0';
+          editableElement.style.boxShadow = 'none';
+          setSelectedElements(prev => prev.filter(el => el !== editableElement));
+        } else {
+          editableElement.classList.add('component-selected');
+          editableElement.style.outline = '3px solid #000000';
+          editableElement.style.boxShadow = 'none';
+          setSelectedElements(prev => [...prev, editableElement]);
+        }
+      };
+
+      // ⭐ Step 5와 동일한 방식으로 이벤트 리스너 등록 (capture phase)
+      componentElements.forEach((el) => {
+        if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(el.tagName)) {
+          const htmlEl = el as HTMLElement;
+          htmlEl.setAttribute('data-component-editable', 'true');
+          htmlEl.style.cursor = 'pointer';
+          htmlEl.style.outline = '1px dashed #C0C0C0';
+
+          // 기존 핸들러가 있으면 제거
+          const existingHandler = componentClickHandlersRef.current.get(htmlEl);
+          if (existingHandler) {
+            htmlEl.removeEventListener('click', existingHandler, true);
+          }
+
+          // 클릭 이벤트 리스너 추가 및 저장 (capture phase)
+          htmlEl.addEventListener('click', handleComponentClick, true);
+          componentClickHandlersRef.current.set(htmlEl, handleComponentClick);
+        }
+      });
+
+      // ⭐ 링크 클릭 방지 (다른 사이트로 이동 방지)
+      const allLinks = iframeDoc.querySelectorAll('a');
+      const preventLinkNavigation = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+          e.stopImmediatePropagation();
+        return false;
+      };
+
+      allLinks.forEach(link => {
+        const htmlLink = link as HTMLElement;
+        // 기존 핸들러가 있으면 제거
+        const existingLinkHandler = linkClickHandlersRef.current.get(htmlLink);
+        if (existingLinkHandler) {
+          htmlLink.removeEventListener('click', existingLinkHandler, true);
+        }
+        htmlLink.addEventListener('click', preventLinkNavigation, true);
+        linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
+        htmlLink.style.cursor = 'pointer';
+      });
+
+      console.log('✅ TranslationWork 컴포넌트 클릭 리스너 추가 완료:', componentElements.length, '개');
+      console.log('✅ TranslationWork 링크 클릭 방지 핸들러 추가 완료:', allLinks.length, '개');
     }
-  }, [editorMode, isTranslationEditorInitialized, collapsedPanels, fullscreenPanel]);
+
+    // ⭐ cleanup 함수: 컴포넌트 언마운트 시 window 리스너 제거
+    return () => {
+      console.log('🧹 TranslationWork cleanup: 이벤트 리스너 제거');
+      // window 리스너 제거
+      if (windowKeydownHandlerRef.current) {
+        window.removeEventListener('keydown', windowKeydownHandlerRef.current, true);
+        console.log('✅ TranslationWork window 키보드 리스너 제거');
+      }
+    };
+  }, [editorMode, isTranslationEditorInitialized, savedTranslationHtml]); // ⭐ savedTranslationHtml 추가하여 undo/redo 후 자동 재활성화
 
   // 자동 저장 (디바운스)
   useEffect(() => {
@@ -1289,25 +1659,6 @@ export default function TranslationWork() {
             />
             <span>내 번역 (작업 중)</span>
           </label>
-          <div style={{ 
-            fontSize: '11px', 
-            color: colors.secondaryText, 
-            marginLeft: '8px',
-            paddingLeft: '16px',
-            borderLeft: '1px solid #D3D3D3',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}>
-            <span>진행률: {progress.completed}/{progress.total} ({progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0}%)</span>
-            <span style={{ 
-              fontSize: '10px', 
-              color: '#808080',
-              fontStyle: 'italic',
-            }} title="각 문단 옆 체크박스를 클릭하여 번역 완료를 표시하세요">
-              💡 문단 옆 체크박스로 완료 표시
-            </span>
-            </div>
           </div>
 
         {/* 오른쪽: 저장/완료 버튼 */}
@@ -1409,16 +1760,6 @@ export default function TranslationWork() {
                       {panel.title}
                     </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {panel.id === 'myTranslation' && (
-                    <span style={{ 
-                          fontSize: '11px',
-                      color: '#2C5F7C', 
-                          fontWeight: 500,
-                      marginRight: '4px',
-                    }}>
-                      💡 각 문단 옆 체크박스를 클릭하여 번역 완료를 표시하세요
-                    </span>
-                  )}
                       <button
                     onClick={() => toggleFullscreen(panel.id)}
                         style={{
@@ -1739,9 +2080,19 @@ export default function TranslationWork() {
                                 setSavedTranslationHtml(updatedHtml);
                                 console.log('🗑️ 선택된 요소 삭제:', selectedElements.length, '개');
                                 
-                                // ⭐ 삭제 후 컴포넌트 편집 모드 재활성화 (이벤트 리스너 재등록)
-                                setEditorMode('text');
-                                setTimeout(() => setEditorMode('component'), 0);
+                                // ⭐ 삭제 후 iframe에 포커스를 주어 키보드 단축키가 바로 작동하도록 함
+                                setTimeout(() => {
+                                  // body에 tabIndex 설정하여 포커스 가능하게 만들기
+                                  if (iframeDoc.body) {
+                                    iframeDoc.body.setAttribute('tabindex', '-1');
+                                    iframeDoc.body.focus();
+                                  }
+                                  if (myTranslationIframeRef.current?.contentWindow) {
+                                    myTranslationIframeRef.current.contentWindow.focus();
+                                  }
+                                  myTranslationIframeRef.current?.focus();
+                                  console.log('🎯 TranslationWork iframe에 포커스 설정');
+                                }, 100);
                               }}
                               style={{ fontSize: '11px', padding: '4px 8px' }}
                             >
@@ -1757,7 +2108,15 @@ export default function TranslationWork() {
                               if (!iframeDoc) return;
                               
                               if (editorMode === 'text') {
+                                // ⭐ 버튼 클릭 시 focus를 iframe body로 이동 (execCommand가 작동하려면 필요)
+                                iframeDoc.body.setAttribute('tabindex', '-1');
+                                iframeDoc.body.focus();
+                                
                                 iframeDoc.execCommand('undo', false);
+                                const updatedHtml = iframeDoc.documentElement.outerHTML;
+                                currentEditorHtmlRef.current = updatedHtml;
+                                // ⭐ setSavedTranslationHtml 제거 - Step 5와 동일하게 useEffect 재트리거 방지
+                                console.log('↩️ Undo (TranslationWork 텍스트 - 버튼)');
                               } else {
                                 if (undoStackRef.current.length > 0) {
                                   const previousHtml = undoStackRef.current.pop()!;
@@ -1767,6 +2126,16 @@ export default function TranslationWork() {
                                   iframeDoc.write(previousHtml);
                                   iframeDoc.close();
                                   setSavedTranslationHtml(previousHtml);
+                                  
+                                  // ⭐ savedTranslationHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+                                  // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+                                  setTimeout(() => {
+                                    const newIframeDoc = myTranslationIframeRef.current?.contentDocument || myTranslationIframeRef.current?.contentWindow?.document;
+                                    if (newIframeDoc?.body) {
+                                      newIframeDoc.body.setAttribute('tabindex', '-1');
+                                      newIframeDoc.body.focus();
+                                    }
+                                  }, 50);
                                 }
                               }
                             }}
@@ -1790,7 +2159,15 @@ export default function TranslationWork() {
                               if (!iframeDoc) return;
                               
                               if (editorMode === 'text') {
+                                // ⭐ 버튼 클릭 시 focus를 iframe body로 이동 (execCommand가 작동하려면 필요)
+                                iframeDoc.body.setAttribute('tabindex', '-1');
+                                iframeDoc.body.focus();
+                                
                                 iframeDoc.execCommand('redo', false);
+                                const updatedHtml = iframeDoc.documentElement.outerHTML;
+                                currentEditorHtmlRef.current = updatedHtml;
+                                // ⭐ setSavedTranslationHtml 제거 - Step 5와 동일하게 useEffect 재트리거 방지
+                                console.log('↪️ Redo (TranslationWork 텍스트 - 버튼)');
                               } else {
                                 if (redoStackRef.current.length > 0) {
                                   const nextHtml = redoStackRef.current.pop()!;
@@ -1800,6 +2177,16 @@ export default function TranslationWork() {
                                   iframeDoc.write(nextHtml);
                                   iframeDoc.close();
                                   setSavedTranslationHtml(nextHtml);
+                                  
+                                  // ⭐ savedTranslationHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
+                                  // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+                                  setTimeout(() => {
+                                    const newIframeDoc = myTranslationIframeRef.current?.contentDocument || myTranslationIframeRef.current?.contentWindow?.document;
+                                    if (newIframeDoc?.body) {
+                                      newIframeDoc.body.setAttribute('tabindex', '-1');
+                                      newIframeDoc.body.focus();
+                                    }
+                                  }, 50);
                                 }
                               }
                             }}
