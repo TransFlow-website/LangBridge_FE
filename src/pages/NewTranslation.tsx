@@ -3283,9 +3283,10 @@ const Step5ParallelEdit: React.FC<{
   selectedHtml: string; // STEP 2/3에서 선택한 영역
   translatedHtml: string;
   onTranslatedChange: (html: string) => void;
-}> = ({ crawledHtml, selectedHtml, translatedHtml, onTranslatedChange }) => {
+  collapsedPanels: Set<string>;
+  onTogglePanel: (panelId: string) => void;
+}> = ({ crawledHtml, selectedHtml, translatedHtml, onTranslatedChange, collapsedPanels, onTogglePanel }) => {
   const [mode, setMode] = useState<EditorMode>('text');
-  const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(new Set());
   const [fullscreenPanel, setFullscreenPanel] = useState<string | null>(null);
   const [selectedElements, setSelectedElements] = useState<HTMLElement[]>([]);
   
@@ -3308,18 +3309,8 @@ const Step5ParallelEdit: React.FC<{
   const windowKeydownHandlerRef = React.useRef<((e: KeyboardEvent) => void) | null>(null);
   const iframeKeydownHandlerRef = React.useRef<((e: KeyboardEvent) => void) | null>(null);
 
-  // 패널 접기/펼치기
-  const togglePanel = (panelId: string) => {
-    setCollapsedPanels(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(panelId)) {
-        newSet.delete(panelId);
-      } else {
-        newSet.add(panelId);
-      }
-      return newSet;
-    });
-  };
+  // 패널 접기/펼치기 (props로 받은 함수 사용)
+  const togglePanel = onTogglePanel;
 
   // 전체화면 토글
   const toggleFullscreen = (panelId: string) => {
@@ -4060,16 +4051,15 @@ const Step5ParallelEdit: React.FC<{
     { id: 'translated', title: 'Version 1 (AI 초벌 번역)', ref: translatedIframeRef, editable: true },
   ];
 
-  const visiblePanels = panels.filter(p => !collapsedPanels.has(p.id));
-  const hasFullscreen = fullscreenPanel !== null;
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '8px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 3개 패널 */}
-      <div style={{ display: 'flex', height: '100%', gap: '4px' }}>
+      <div style={{ display: 'flex', height: '100%', gap: '4px', padding: '4px' }}>
         {panels.map(panel => {
           const isCollapsed = collapsedPanels.has(panel.id);
           const isFullscreen = fullscreenPanel === panel.id;
+          const visiblePanels = panels.filter(p => !collapsedPanels.has(p.id));
+          const hasFullscreen = fullscreenPanel !== null;
           const isHidden = hasFullscreen && !isFullscreen;
 
           if (isHidden) return null; // 전체화면 모드에서 다른 패널 숨김
@@ -4078,90 +4068,63 @@ const Step5ParallelEdit: React.FC<{
             <div
               key={panel.id}
               style={{
-                flex: isCollapsed ? '0 0 48px' : isFullscreen ? '1' : `1 1 ${100 / visiblePanels.length}%`,
-                display: 'flex',
+                flex: isCollapsed ? '0 0 0' : isFullscreen ? '1' : `1 1 ${100 / visiblePanels.length}%`,
+                display: isCollapsed ? 'none' : 'flex',
                 flexDirection: 'column',
                 transition: 'flex 0.2s ease',
-                minWidth: isCollapsed ? '48px' : '200px',
+                minWidth: isCollapsed ? '0' : '200px',
               }}
             >
               {/* 패널 헤더 */}
               <div
                 style={{
                   display: 'flex',
-                  justifyContent: isCollapsed ? 'center' : 'space-between',
+                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  padding: isCollapsed ? '12px 4px' : '8px 12px',
+                  padding: '8px 12px',
                   backgroundColor: '#D3D3D3',
                   borderRadius: '4px 4px 0 0',
-                  cursor: isCollapsed ? 'pointer' : 'default',
-                  height: isCollapsed ? 'auto' : '36px',
-                  writingMode: isCollapsed ? 'vertical-rl' : 'horizontal-tb',
-                  textOrientation: isCollapsed ? 'mixed' : 'mixed',
+                  cursor: 'default',
+                  height: '36px',
                 }}
-                onClick={isCollapsed ? () => togglePanel(panel.id) : undefined}
               >
-                {isCollapsed ? (
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#000000', whiteSpace: 'nowrap' }}>
-                    {panel.title}
-                  </span>
-                ) : (
-                  <>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#000000' }}>
-                      {panel.title}
-                    </span>
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <button
-                        onClick={() => toggleFullscreen(panel.id)}
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '11px',
-                          border: '1px solid #A9A9A9',
-                          borderRadius: '3px',
-                          backgroundColor: '#FFFFFF',
-                          color: '#000000',
-                          cursor: 'pointer',
-                          fontWeight: 500,
-                        }}
-                        title="전체화면"
-                      >
-                        {isFullscreen ? '축소' : '전체'}
-                      </button>
-                      <button
-                        onClick={() => togglePanel(panel.id)}
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '11px',
-                          border: '1px solid #A9A9A9',
-                          borderRadius: '3px',
-                          backgroundColor: '#FFFFFF',
-                          color: '#000000',
-                          cursor: 'pointer',
-                          fontWeight: 500,
-                        }}
-                        title="접기"
-                      >
-                        접기
-                      </button>
-                    </div>
-                  </>
-                )}
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#000000' }}>
+                  {panel.title}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    onClick={() => toggleFullscreen(panel.id)}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '11px',
+                      border: '1px solid #A9A9A9',
+                      borderRadius: '3px',
+                      backgroundColor: '#FFFFFF',
+                      color: '#000000',
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                    }}
+                    title={isFullscreen ? '확대 해제' : '전체화면 확대'}
+                  >
+                    {isFullscreen ? '축소' : '확대'}
+                  </button>
+                </div>
               </div>
 
               {/* 패널 내용 */}
-              {!isCollapsed && (
-                <div
-                  style={{
-                    flex: 1,
-                    border: '1px solid #C0C0C0',
-                    borderTop: 'none',
-                    borderRadius: '0 0 4px 4px',
-                    overflow: 'hidden',
-                    backgroundColor: '#FFFFFF',
-                    display: 'flex',
-                    flexDirection: 'column',
-                  }}
-                >
+              <div
+                style={{
+                  flex: 1,
+                  border: '1px solid #C0C0C0',
+                  borderTop: 'none',
+                  borderRadius: '0 0 4px 4px',
+                  overflow: 'hidden',
+                  backgroundColor: '#FFFFFF',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  position: 'relative', // 오버레이를 위한 relative positioning
+                }}
+              >
                   {/* 편집본 패널에만 편집 툴바 추가 */}
                   {panel.id === 'translated' && (
                     <>
@@ -4627,7 +4590,6 @@ const Step5ParallelEdit: React.FC<{
                     />
                   </div>
                 </div>
-              )}
             </div>
           );
         })}
@@ -4690,6 +4652,8 @@ const NewTranslation: React.FC = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const step6Ref = React.useRef<{ handleDraftSave: () => void; handlePublish: () => void } | null>(null);
+  // Step 5용 패널 접기/펼치기 상태
+  const [step5CollapsedPanels, setStep5CollapsedPanels] = useState<Set<string>>(new Set());
 
   const userRole = useMemo(() => {
     if (!user) return null;
@@ -5151,6 +5115,18 @@ const NewTranslation: React.FC = () => {
             selectedHtml={draft.editedHtml || draft.originalHtmlWithIds || ''} // STEP 2/3에서 선택한 영역
             translatedHtml={draft.translatedHtml || ''}
             onTranslatedChange={(html) => setDraft((prev) => ({ ...prev, translatedHtml: html }))}
+            collapsedPanels={step5CollapsedPanels}
+            onTogglePanel={(panelId) => {
+              setStep5CollapsedPanels(prev => {
+                const newSet = new Set(prev);
+                if (newSet.has(panelId)) {
+                  newSet.delete(panelId);
+                } else {
+                  newSet.add(panelId);
+                }
+                return newSet;
+              });
+            }}
           />
         );
       case 6:
@@ -5182,64 +5158,173 @@ const NewTranslation: React.FC = () => {
       {/* 상단 상태 바 */}
       <div
         style={{
-          padding: '8px 16px',
+          padding: '12px 24px',
           borderBottom: '1px solid #C0C0C0',
           backgroundColor: '#FFFFFF',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          gap: '16px',
         }}
       >
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+        {/* 왼쪽: STEP 정보 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1 }}>
+          <div
+            style={{
+              fontSize: '13px',
+              fontWeight: 500,
+              color: '#000000',
+              fontFamily: 'system-ui, Pretendard, sans-serif',
+            }}
+          >
+            STEP {currentStep} / 6
+          </div>
+          <div
+            style={{
+              fontSize: '12px',
+              color: '#696969',
+              fontFamily: 'system-ui, Pretendard, sans-serif',
+              fontWeight: 500,
+            }}
+          >
+            {currentStep === 1 && '가져올 웹사이트 주소 입력'}
+            {currentStep === 2 && '영역 선택'}
+            {currentStep === 3 && '번역 전 편집'}
+            {currentStep === 4 && '번역 실행'}
+            {currentStep === 5 && '번역 후 편집'}
+            {currentStep === 6 && '문서 정보 입력 및 생성'}
+          </div>
+          <div
+            style={{
+              fontSize: '12px',
+              color: '#696969',
+              fontFamily: 'system-ui, Pretendard, sans-serif',
+            }}
+          >
+            {lastSaved ? `마지막 저장: ${lastSaved.toLocaleTimeString()}` : '저장되지 않음'}
+          </div>
+          {saveError && (
             <div
               style={{
-                fontSize: '13px',
-                fontWeight: 500,
+                fontSize: '12px',
                 color: '#000000',
                 fontFamily: 'system-ui, Pretendard, sans-serif',
+                backgroundColor: '#D3D3D3',
+                padding: '4px 8px',
+                borderRadius: '4px',
               }}
             >
-              STEP {currentStep} / 6
+              {saveError}
             </div>
-            <div
-              style={{
-                fontSize: '12px',
-                color: '#696969',
-                fontFamily: 'system-ui, Pretendard, sans-serif',
-                fontWeight: 500,
-              }}
-            >
-              {currentStep === 1 && '가져올 웹사이트 주소 입력'}
-              {currentStep === 2 && '영역 선택'}
-              {currentStep === 3 && '번역 전 편집'}
-              {currentStep === 4 && '번역 실행'}
-              {currentStep === 5 && '번역 후 편집'}
-              {currentStep === 6 && '문서 정보 입력 및 생성'}
-            </div>
-            <div
-              style={{
-                fontSize: '12px',
-                color: '#696969',
-                fontFamily: 'system-ui, Pretendard, sans-serif',
-              }}
-            >
-              {lastSaved ? `마지막 저장: ${lastSaved.toLocaleTimeString()}` : '저장되지 않음'}
-            </div>
-            {saveError && (
-              <div
-                style={{
-                  fontSize: '12px',
-                  color: '#000000',
-                  fontFamily: 'system-ui, Pretendard, sans-serif',
-                  backgroundColor: '#D3D3D3',
-                  padding: '4px 8px',
-                  borderRadius: '4px',
+          )}
+        </div>
+
+        {/* 중앙: 문서 보기 옵션 (Step 5일 때만 표시) */}
+        {currentStep === 5 && (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '24px',
+            padding: '6px 16px',
+            backgroundColor: '#F8F9FA',
+            borderRadius: '6px',
+            border: '1px solid #D3D3D3',
+          }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#000000' }}>문서 보기:</span>
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              fontSize: '13px', 
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}>
+              <input
+                type="checkbox"
+                checked={!step5CollapsedPanels.has('crawled')}
+                onChange={() => {
+                  setStep5CollapsedPanels(prev => {
+                    const newSet = new Set(prev);
+                    if (newSet.has('crawled')) {
+                      newSet.delete('crawled');
+                    } else {
+                      newSet.add('crawled');
+                    }
+                    return newSet;
+                  });
                 }}
-              >
-                {saveError}
-              </div>
-            )}
+                style={{
+                  cursor: 'pointer',
+                  width: '16px',
+                  height: '16px',
+                }}
+              />
+              <span>원본 웹사이트</span>
+            </label>
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              fontSize: '13px', 
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}>
+              <input
+                type="checkbox"
+                checked={!step5CollapsedPanels.has('selected')}
+                onChange={() => {
+                  setStep5CollapsedPanels(prev => {
+                    const newSet = new Set(prev);
+                    if (newSet.has('selected')) {
+                      newSet.delete('selected');
+                    } else {
+                      newSet.add('selected');
+                    }
+                    return newSet;
+                  });
+                }}
+                style={{ 
+                  cursor: 'pointer',
+                  width: '16px',
+                  height: '16px',
+                }}
+              />
+              <span>Version 0</span>
+            </label>
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              fontSize: '13px', 
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}>
+              <input
+                type="checkbox"
+                checked={!step5CollapsedPanels.has('translated')}
+                onChange={() => {
+                  setStep5CollapsedPanels(prev => {
+                    const newSet = new Set(prev);
+                    if (newSet.has('translated')) {
+                      newSet.delete('translated');
+                    } else {
+                      newSet.add('translated');
+                    }
+                    return newSet;
+                  });
+                }}
+                style={{ 
+                  cursor: 'pointer',
+                  width: '16px',
+                  height: '16px',
+                }}
+              />
+              <span>Version 1 (AI 초벌 번역)</span>
+            </label>
           </div>
+        )}
+
+        {/* 오른쪽: 임시 저장 버튼 */}
         <div>
           <Button variant="secondary" onClick={handleSaveDraft} style={{ fontSize: '12px', padding: '4px 8px' }}>
             임시 저장
