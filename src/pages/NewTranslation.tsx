@@ -894,15 +894,91 @@ const Step3PreEdit: React.FC<{
             iframeDoc.close();
             
             onHtmlChange(previousHtml);
-            setSelectedElements([]);
             
-            // ⭐ html 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
-            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+            // 컴포넌트 편집 모드 다시 초기화
             setTimeout(() => {
-              if (iframeDoc.body) {
-                iframeDoc.body.focus();
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (!newIframeDoc) return;
+              
+              // contentEditable 비활성화
+              const editableElements = newIframeDoc.querySelectorAll('[contenteditable="true"]');
+              editableElements.forEach((el) => {
+                (el as HTMLElement).contentEditable = 'false';
+                (el as HTMLElement).style.cursor = 'default';
+              });
+              
+              // 컴포넌트 클릭 핸들러 추가
+              const componentElements = newIframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6');
+              
+              const handleComponentClick = (e: Event) => {
+                e.stopPropagation();
+                e.preventDefault();
+                
+                const target = e.target as HTMLElement;
+                if (!target || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(target.tagName)) return;
+                
+                const isSelected = target.classList.contains('component-selected');
+                
+                if (isSelected) {
+                  target.classList.remove('component-selected');
+                  target.style.outline = '1px dashed #C0C0C0';
+                  target.style.boxShadow = 'none';
+                  target.style.backgroundColor = '';
+                  setSelectedElements(prev => prev.filter(el => el !== target));
+                } else {
+                  target.classList.add('component-selected');
+                  target.style.outline = '4px solid #28a745';
+                  target.style.outlineOffset = '3px';
+                  target.style.backgroundColor = 'rgba(40, 167, 69, 0.25)';
+                  target.style.boxShadow = '0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5)';
+                  target.style.transition = 'all 0.2s ease';
+                  setSelectedElements(prev => [...prev, target]);
+                }
+              };
+              
+              componentElements.forEach((el) => {
+                if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(el.tagName)) {
+                  const htmlEl = el as HTMLElement;
+                  htmlEl.setAttribute('data-component-editable', 'true');
+                  htmlEl.style.cursor = 'pointer';
+                  htmlEl.style.outline = '1px dashed #C0C0C0';
+                  
+                  const existingHandler = componentClickHandlersRef.current.get(htmlEl);
+                  if (existingHandler) {
+                    htmlEl.removeEventListener('click', existingHandler, true);
+                  }
+                  htmlEl.addEventListener('click', handleComponentClick, true);
+                  componentClickHandlersRef.current.set(htmlEl, handleComponentClick);
+                }
+              });
+              
+              // 링크 클릭 방지 핸들러 추가
+              const allLinks = newIframeDoc.querySelectorAll('a');
+              const preventLinkNavigation = (e: Event) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+              };
+              
+              allLinks.forEach(link => {
+                const htmlLink = link as HTMLElement;
+                const existingLinkHandler = linkClickHandlersRef.current.get(htmlLink);
+                if (existingLinkHandler) {
+                  htmlLink.removeEventListener('click', existingLinkHandler, true);
+                }
+                htmlLink.addEventListener('click', preventLinkNavigation, true);
+                linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
+                htmlLink.style.cursor = 'pointer';
+              });
+              
+              if (newIframeDoc.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
               }
-            }, 50);
+            }, 100);
+            
+            setSelectedElements([]);
           } else {
             console.log('⚠️ Step 3 컴포넌트 Undo stack이 비어있습니다');
           }
@@ -928,15 +1004,91 @@ const Step3PreEdit: React.FC<{
             iframeDoc.close();
             
             onHtmlChange(nextHtml);
-            setSelectedElements([]);
             
-            // ⭐ html 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
-            // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+            // 컴포넌트 편집 모드 다시 초기화
             setTimeout(() => {
-              if (iframeDoc.body) {
-                iframeDoc.body.focus();
+              const newIframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (!newIframeDoc) return;
+              
+              // contentEditable 비활성화
+              const editableElements = newIframeDoc.querySelectorAll('[contenteditable="true"]');
+              editableElements.forEach((el) => {
+                (el as HTMLElement).contentEditable = 'false';
+                (el as HTMLElement).style.cursor = 'default';
+              });
+              
+              // 컴포넌트 클릭 핸들러 추가
+              const componentElements = newIframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6');
+              
+              const handleComponentClick = (e: Event) => {
+                e.stopPropagation();
+                e.preventDefault();
+                
+                const target = e.target as HTMLElement;
+                if (!target || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(target.tagName)) return;
+                
+                const isSelected = target.classList.contains('component-selected');
+                
+                if (isSelected) {
+                  target.classList.remove('component-selected');
+                  target.style.outline = '1px dashed #C0C0C0';
+                  target.style.boxShadow = 'none';
+                  target.style.backgroundColor = '';
+                  setSelectedElements(prev => prev.filter(el => el !== target));
+                } else {
+                  target.classList.add('component-selected');
+                  target.style.outline = '4px solid #28a745';
+                  target.style.outlineOffset = '3px';
+                  target.style.backgroundColor = 'rgba(40, 167, 69, 0.25)';
+                  target.style.boxShadow = '0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5)';
+                  target.style.transition = 'all 0.2s ease';
+                  setSelectedElements(prev => [...prev, target]);
+                }
+              };
+              
+              componentElements.forEach((el) => {
+                if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(el.tagName)) {
+                  const htmlEl = el as HTMLElement;
+                  htmlEl.setAttribute('data-component-editable', 'true');
+                  htmlEl.style.cursor = 'pointer';
+                  htmlEl.style.outline = '1px dashed #C0C0C0';
+                  
+                  const existingHandler = componentClickHandlersRef.current.get(htmlEl);
+                  if (existingHandler) {
+                    htmlEl.removeEventListener('click', existingHandler, true);
+                  }
+                  htmlEl.addEventListener('click', handleComponentClick, true);
+                  componentClickHandlersRef.current.set(htmlEl, handleComponentClick);
+                }
+              });
+              
+              // 링크 클릭 방지 핸들러 추가
+              const allLinks = newIframeDoc.querySelectorAll('a');
+              const preventLinkNavigation = (e: Event) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+              };
+              
+              allLinks.forEach(link => {
+                const htmlLink = link as HTMLElement;
+                const existingLinkHandler = linkClickHandlersRef.current.get(htmlLink);
+                if (existingLinkHandler) {
+                  htmlLink.removeEventListener('click', existingLinkHandler, true);
+                }
+                htmlLink.addEventListener('click', preventLinkNavigation, true);
+                linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
+                htmlLink.style.cursor = 'pointer';
+              });
+              
+              if (newIframeDoc.body) {
+                newIframeDoc.body.setAttribute('tabindex', '-1');
+                newIframeDoc.body.focus();
               }
-            }, 50);
+            }, 100);
+            
+            setSelectedElements([]);
           } else {
             console.log('⚠️ Step 3 컴포넌트 Redo stack이 비어있습니다');
           }
@@ -2103,12 +2255,90 @@ const Step3PreEdit: React.FC<{
                     
                     // 컴포넌트 편집 모드 다시 초기화
                     setTimeout(() => {
-                      const editableElements = iframeDoc.querySelectorAll('[contenteditable="true"]');
+                      const newIframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
+                      if (!newIframeDoc) return;
+                      
+                      // contentEditable 비활성화
+                      const editableElements = newIframeDoc.querySelectorAll('[contenteditable="true"]');
                       editableElements.forEach((el) => {
                         (el as HTMLElement).contentEditable = 'false';
                         (el as HTMLElement).style.cursor = 'default';
                       });
-                    }, 0);
+                      
+                      // 컴포넌트 클릭 핸들러 추가
+                      const componentElements = newIframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6');
+                      
+                      const handleComponentClick = (e: Event) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        
+                        const target = e.target as HTMLElement;
+                        if (!target || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(target.tagName)) return;
+                        
+                        const isSelected = target.classList.contains('component-selected');
+                        
+                        if (isSelected) {
+                          target.classList.remove('component-selected');
+                          target.style.outline = '1px dashed #C0C0C0';
+                          target.style.boxShadow = 'none';
+                          target.style.backgroundColor = '';
+                          setSelectedElements(prev => prev.filter(el => el !== target));
+                        } else {
+                          target.classList.add('component-selected');
+                          target.style.outline = '4px solid #28a745';
+                          target.style.outlineOffset = '3px';
+                          target.style.backgroundColor = 'rgba(40, 167, 69, 0.25)';
+                          target.style.boxShadow = '0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5)';
+                          target.style.transition = 'all 0.2s ease';
+                          setSelectedElements(prev => [...prev, target]);
+                        }
+                      };
+                      
+                      componentElements.forEach((el) => {
+                        if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(el.tagName)) {
+                          const htmlEl = el as HTMLElement;
+                          htmlEl.setAttribute('data-component-editable', 'true');
+                          htmlEl.style.cursor = 'pointer';
+                          htmlEl.style.outline = '1px dashed #C0C0C0';
+                          
+                          // 기존 핸들러 제거 후 새로 추가
+                          const existingHandler = componentClickHandlersRef.current.get(htmlEl);
+                          if (existingHandler) {
+                            htmlEl.removeEventListener('click', existingHandler, true);
+                          }
+                          htmlEl.addEventListener('click', handleComponentClick, true);
+                          componentClickHandlersRef.current.set(htmlEl, handleComponentClick);
+                        }
+                      });
+                      
+                      // 링크 클릭 방지 핸들러 추가
+                      const allLinks = newIframeDoc.querySelectorAll('a');
+                      const preventLinkNavigation = (e: Event) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        return false;
+                      };
+                      
+                      allLinks.forEach(link => {
+                        const htmlLink = link as HTMLElement;
+                        const existingLinkHandler = linkClickHandlersRef.current.get(htmlLink);
+                        if (existingLinkHandler) {
+                          htmlLink.removeEventListener('click', existingLinkHandler, true);
+                        }
+                        htmlLink.addEventListener('click', preventLinkNavigation, true);
+                        linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
+                        htmlLink.style.cursor = 'pointer';
+                      });
+                      
+                      // iframe 포커스 설정
+                      if (newIframeDoc.body) {
+                        newIframeDoc.body.setAttribute('tabindex', '-1');
+                        newIframeDoc.body.focus();
+                      }
+                    }, 100);
+                    
+                    setSelectedElements([]);
                     
                     console.log('↶ 컴포넌트 편집 실행 취소 완료. 남은 undo:', undoStackRef.current.length);
                   } else {
@@ -2185,12 +2415,90 @@ const Step3PreEdit: React.FC<{
                     
                     // 컴포넌트 편집 모드 다시 초기화
                     setTimeout(() => {
-                      const editableElements = iframeDoc.querySelectorAll('[contenteditable="true"]');
+                      const newIframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
+                      if (!newIframeDoc) return;
+                      
+                      // contentEditable 비활성화
+                      const editableElements = newIframeDoc.querySelectorAll('[contenteditable="true"]');
                       editableElements.forEach((el) => {
                         (el as HTMLElement).contentEditable = 'false';
                         (el as HTMLElement).style.cursor = 'default';
                       });
-                    }, 0);
+                      
+                      // 컴포넌트 클릭 핸들러 추가
+                      const componentElements = newIframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6');
+                      
+                      const handleComponentClick = (e: Event) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        
+                        const target = e.target as HTMLElement;
+                        if (!target || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(target.tagName)) return;
+                        
+                        const isSelected = target.classList.contains('component-selected');
+                        
+                        if (isSelected) {
+                          target.classList.remove('component-selected');
+                          target.style.outline = '1px dashed #C0C0C0';
+                          target.style.boxShadow = 'none';
+                          target.style.backgroundColor = '';
+                          setSelectedElements(prev => prev.filter(el => el !== target));
+                        } else {
+                          target.classList.add('component-selected');
+                          target.style.outline = '4px solid #28a745';
+                          target.style.outlineOffset = '3px';
+                          target.style.backgroundColor = 'rgba(40, 167, 69, 0.25)';
+                          target.style.boxShadow = '0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5)';
+                          target.style.transition = 'all 0.2s ease';
+                          setSelectedElements(prev => [...prev, target]);
+                        }
+                      };
+                      
+                      componentElements.forEach((el) => {
+                        if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(el.tagName)) {
+                          const htmlEl = el as HTMLElement;
+                          htmlEl.setAttribute('data-component-editable', 'true');
+                          htmlEl.style.cursor = 'pointer';
+                          htmlEl.style.outline = '1px dashed #C0C0C0';
+                          
+                          // 기존 핸들러 제거 후 새로 추가
+                          const existingHandler = componentClickHandlersRef.current.get(htmlEl);
+                          if (existingHandler) {
+                            htmlEl.removeEventListener('click', existingHandler, true);
+                          }
+                          htmlEl.addEventListener('click', handleComponentClick, true);
+                          componentClickHandlersRef.current.set(htmlEl, handleComponentClick);
+                        }
+                      });
+                      
+                      // 링크 클릭 방지 핸들러 추가
+                      const allLinks = newIframeDoc.querySelectorAll('a');
+                      const preventLinkNavigation = (e: Event) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        return false;
+                      };
+                      
+                      allLinks.forEach(link => {
+                        const htmlLink = link as HTMLElement;
+                        const existingLinkHandler = linkClickHandlersRef.current.get(htmlLink);
+                        if (existingLinkHandler) {
+                          htmlLink.removeEventListener('click', existingLinkHandler, true);
+                        }
+                        htmlLink.addEventListener('click', preventLinkNavigation, true);
+                        linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
+                        htmlLink.style.cursor = 'pointer';
+                      });
+                      
+                      // iframe 포커스 설정
+                      if (newIframeDoc.body) {
+                        newIframeDoc.body.setAttribute('tabindex', '-1');
+                        newIframeDoc.body.focus();
+                      }
+                    }, 100);
+                    
+                    setSelectedElements([]);
                     
                     console.log('↷ 컴포넌트 편집 다시 실행 완료. 남은 redo:', redoStackRef.current.length);
                   } else {
@@ -3697,7 +4005,7 @@ const Step5ParallelEdit: React.FC<{
       }
       // iframe 리스너는 모드 전환 시 자동으로 제거됨 (DOM이 재설정되므로)
     };
-  }, [mode, isTranslatedInitialized]); // ⭐ Step 3 방식: translatedHtml 제거 (iframe 재렌더링 없이 모드만 변경)
+  }, [mode, isTranslatedInitialized, translatedHtml]); // ⭐ translatedHtml 추가하여 undo/redo 후 자동 재활성화
 
   // 컴포넌트 삭제
   const handleDelete = () => {
@@ -3910,17 +4218,162 @@ const Step5ParallelEdit: React.FC<{
                                   // currentHtmlRef 업데이트
                                   currentHtmlRef.current = previousHtml;
                                   onTranslatedChange(previousHtml);
-                                  setSelectedElements([]);
                                   
-                                  // ⭐ translatedHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
-                                  // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+                                  // 컴포넌트 편집 모드 다시 초기화
                                   setTimeout(() => {
                                     const newIframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
-                                    if (newIframeDoc?.body) {
+                                    if (!newIframeDoc) return;
+                                    
+                                    // contentEditable 비활성화
+                                    const editableElements = newIframeDoc.querySelectorAll('[contenteditable="true"]');
+                                    editableElements.forEach((el) => {
+                                      (el as HTMLElement).contentEditable = 'false';
+                                    });
+                                    
+                                    // CSS 스타일 추가 (useEffect와 동일)
+                                    const existingStyle = newIframeDoc.getElementById('editor-styles');
+                                    if (existingStyle) {
+                                      existingStyle.remove();
+                                    }
+                                    const style = newIframeDoc.createElement('style');
+                                    style.id = 'editor-styles';
+                                    style.textContent = `
+                                      div[data-component-editable],
+                                      section[data-component-editable],
+                                      article[data-component-editable],
+                                      header[data-component-editable],
+                                      footer[data-component-editable],
+                                      main[data-component-editable],
+                                      aside[data-component-editable],
+                                      nav[data-component-editable],
+                                      p[data-component-editable],
+                                      h1[data-component-editable],
+                                      h2[data-component-editable],
+                                      h3[data-component-editable],
+                                      h4[data-component-editable],
+                                      h5[data-component-editable],
+                                      h6[data-component-editable],
+                                      a[data-component-editable] {
+                                        outline: 1px dashed #C0C0C0 !important;
+                                        cursor: pointer !important;
+                                      }
+                                      div[data-component-editable]:hover,
+                                      section[data-component-editable]:hover,
+                                      article[data-component-editable]:hover,
+                                      p[data-component-editable]:hover,
+                                      h1[data-component-editable]:hover,
+                                      h2[data-component-editable]:hover,
+                                      h3[data-component-editable]:hover,
+                                      a[data-component-editable]:hover {
+                                        outline: 2px solid #808080 !important;
+                                      }
+                                      .component-selected {
+                                        outline: 4px solid #28a745 !important;
+                                        outline-offset: 3px !important;
+                                        background-color: rgba(40, 167, 69, 0.25) !important;
+                                        box-shadow: 0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5) !important;
+                                        position: relative !important;
+                                        transition: all 0.2s ease !important;
+                                      }
+                                      .component-selected::after {
+                                        content: '✓ 선택됨';
+                                        position: fixed;
+                                        top: 10px;
+                                        right: 10px;
+                                        background: linear-gradient(135deg, #28a745, #20c997);
+                                        color: white;
+                                        padding: 6px 12px;
+                                        border-radius: 6px;
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        box-shadow: 0 4px 12px rgba(40, 167, 69, 0.5);
+                                        z-index: 999999;
+                                        animation: fadeIn 0.2s ease;
+                                      }
+                                      @keyframes fadeIn {
+                                        from { opacity: 0; transform: translateY(-10px); }
+                                        to { opacity: 1; transform: translateY(0); }
+                                      }
+                                    `;
+                                    newIframeDoc.head.appendChild(style);
+                                    
+                                    // 컴포넌트 클릭 핸들러 추가
+                                    const componentElements = newIframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6, a');
+                                    
+                                    const handleComponentClick = (e: Event) => {
+                                      e.stopPropagation();
+                                      e.preventDefault();
+                                      
+                                      const target = e.target as HTMLElement;
+                                      if (!target || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(target.tagName)) return;
+                                      
+                                      const editableElement = target.closest('[data-component-editable]') as HTMLElement;
+                                      if (!editableElement) return;
+                                      
+                                      const isSelected = editableElement.classList.contains('component-selected');
+                                      
+                                      if (isSelected) {
+                                        editableElement.classList.remove('component-selected');
+                                        editableElement.style.outline = '';
+                                        editableElement.style.boxShadow = '';
+                                        editableElement.style.backgroundColor = '';
+                                        editableElement.style.outlineOffset = '';
+                                        setSelectedElements(prev => prev.filter(el => el !== editableElement));
+                                      } else {
+                                        editableElement.classList.add('component-selected');
+                                        editableElement.style.outline = '';
+                                        editableElement.style.boxShadow = '';
+                                        editableElement.style.backgroundColor = '';
+                                        editableElement.style.outlineOffset = '';
+                                        setSelectedElements(prev => [...prev, editableElement]);
+                                      }
+                                    };
+                                    
+                                    componentElements.forEach((el) => {
+                                      if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(el.tagName)) {
+                                        const htmlEl = el as HTMLElement;
+                                        htmlEl.setAttribute('data-component-editable', 'true');
+                                        htmlEl.style.cursor = 'pointer';
+                                        htmlEl.style.outline = '';
+                                        
+                                        // 기존 핸들러 제거 후 새로 추가
+                                        const existingHandler = componentClickHandlersRef.current.get(htmlEl);
+                                        if (existingHandler) {
+                                          htmlEl.removeEventListener('click', existingHandler, true);
+                                        }
+                                        htmlEl.addEventListener('click', handleComponentClick, true);
+                                        componentClickHandlersRef.current.set(htmlEl, handleComponentClick);
+                                      }
+                                    });
+                                    
+                                    // 링크 클릭 방지 핸들러 추가
+                                    const allLinks = newIframeDoc.querySelectorAll('a');
+                                    const preventLinkNavigation = (e: Event) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                      return false;
+                                    };
+                                    
+                                    allLinks.forEach(link => {
+                                      const htmlLink = link as HTMLElement;
+                                      const existingLinkHandler = linkClickHandlersRef.current.get(htmlLink);
+                                      if (existingLinkHandler) {
+                                        htmlLink.removeEventListener('click', existingLinkHandler, true);
+                                      }
+                                      htmlLink.addEventListener('click', preventLinkNavigation, true);
+                                      linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
+                                      htmlLink.style.cursor = 'pointer';
+                                    });
+                                    
+                                    // iframe 포커스 설정
+                                    if (newIframeDoc.body) {
                                       newIframeDoc.body.setAttribute('tabindex', '-1');
                                       newIframeDoc.body.focus();
                                     }
-                                  }, 50);
+                                  }, 100);
+                                  
+                                  setSelectedElements([]);
                                   
                                   console.log('↶ Step 5 컴포넌트 편집 실행 취소 완료. 남은 undo:', undoStackRef.current.length);
                                 } else {
@@ -3966,17 +4419,162 @@ const Step5ParallelEdit: React.FC<{
                                   // currentHtmlRef 업데이트
                                   currentHtmlRef.current = nextHtml;
                                   onTranslatedChange(nextHtml);
-                                  setSelectedElements([]);
                                   
-                                  // ⭐ translatedHtml 의존성 배열에 추가되어 useEffect가 자동으로 재실행됨
-                                  // iframe에 포커스를 주어 키보드 이벤트가 계속 작동하도록 함
+                                  // 컴포넌트 편집 모드 다시 초기화
                                   setTimeout(() => {
                                     const newIframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
-                                    if (newIframeDoc?.body) {
+                                    if (!newIframeDoc) return;
+                                    
+                                    // contentEditable 비활성화
+                                    const editableElements = newIframeDoc.querySelectorAll('[contenteditable="true"]');
+                                    editableElements.forEach((el) => {
+                                      (el as HTMLElement).contentEditable = 'false';
+                                    });
+                                    
+                                    // CSS 스타일 추가 (useEffect와 동일)
+                                    const existingStyle = newIframeDoc.getElementById('editor-styles');
+                                    if (existingStyle) {
+                                      existingStyle.remove();
+                                    }
+                                    const style = newIframeDoc.createElement('style');
+                                    style.id = 'editor-styles';
+                                    style.textContent = `
+                                      div[data-component-editable],
+                                      section[data-component-editable],
+                                      article[data-component-editable],
+                                      header[data-component-editable],
+                                      footer[data-component-editable],
+                                      main[data-component-editable],
+                                      aside[data-component-editable],
+                                      nav[data-component-editable],
+                                      p[data-component-editable],
+                                      h1[data-component-editable],
+                                      h2[data-component-editable],
+                                      h3[data-component-editable],
+                                      h4[data-component-editable],
+                                      h5[data-component-editable],
+                                      h6[data-component-editable],
+                                      a[data-component-editable] {
+                                        outline: 1px dashed #C0C0C0 !important;
+                                        cursor: pointer !important;
+                                      }
+                                      div[data-component-editable]:hover,
+                                      section[data-component-editable]:hover,
+                                      article[data-component-editable]:hover,
+                                      p[data-component-editable]:hover,
+                                      h1[data-component-editable]:hover,
+                                      h2[data-component-editable]:hover,
+                                      h3[data-component-editable]:hover,
+                                      a[data-component-editable]:hover {
+                                        outline: 2px solid #808080 !important;
+                                      }
+                                      .component-selected {
+                                        outline: 4px solid #28a745 !important;
+                                        outline-offset: 3px !important;
+                                        background-color: rgba(40, 167, 69, 0.25) !important;
+                                        box-shadow: 0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5) !important;
+                                        position: relative !important;
+                                        transition: all 0.2s ease !important;
+                                      }
+                                      .component-selected::after {
+                                        content: '✓ 선택됨';
+                                        position: fixed;
+                                        top: 10px;
+                                        right: 10px;
+                                        background: linear-gradient(135deg, #28a745, #20c997);
+                                        color: white;
+                                        padding: 6px 12px;
+                                        border-radius: 6px;
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        box-shadow: 0 4px 12px rgba(40, 167, 69, 0.5);
+                                        z-index: 999999;
+                                        animation: fadeIn 0.2s ease;
+                                      }
+                                      @keyframes fadeIn {
+                                        from { opacity: 0; transform: translateY(-10px); }
+                                        to { opacity: 1; transform: translateY(0); }
+                                      }
+                                    `;
+                                    newIframeDoc.head.appendChild(style);
+                                    
+                                    // 컴포넌트 클릭 핸들러 추가
+                                    const componentElements = newIframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6, a');
+                                    
+                                    const handleComponentClick = (e: Event) => {
+                                      e.stopPropagation();
+                                      e.preventDefault();
+                                      
+                                      const target = e.target as HTMLElement;
+                                      if (!target || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(target.tagName)) return;
+                                      
+                                      const editableElement = target.closest('[data-component-editable]') as HTMLElement;
+                                      if (!editableElement) return;
+                                      
+                                      const isSelected = editableElement.classList.contains('component-selected');
+                                      
+                                      if (isSelected) {
+                                        editableElement.classList.remove('component-selected');
+                                        editableElement.style.outline = '';
+                                        editableElement.style.boxShadow = '';
+                                        editableElement.style.backgroundColor = '';
+                                        editableElement.style.outlineOffset = '';
+                                        setSelectedElements(prev => prev.filter(el => el !== editableElement));
+                                      } else {
+                                        editableElement.classList.add('component-selected');
+                                        editableElement.style.outline = '';
+                                        editableElement.style.boxShadow = '';
+                                        editableElement.style.backgroundColor = '';
+                                        editableElement.style.outlineOffset = '';
+                                        setSelectedElements(prev => [...prev, editableElement]);
+                                      }
+                                    };
+                                    
+                                    componentElements.forEach((el) => {
+                                      if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(el.tagName)) {
+                                        const htmlEl = el as HTMLElement;
+                                        htmlEl.setAttribute('data-component-editable', 'true');
+                                        htmlEl.style.cursor = 'pointer';
+                                        htmlEl.style.outline = '';
+                                        
+                                        // 기존 핸들러 제거 후 새로 추가
+                                        const existingHandler = componentClickHandlersRef.current.get(htmlEl);
+                                        if (existingHandler) {
+                                          htmlEl.removeEventListener('click', existingHandler, true);
+                                        }
+                                        htmlEl.addEventListener('click', handleComponentClick, true);
+                                        componentClickHandlersRef.current.set(htmlEl, handleComponentClick);
+                                      }
+                                    });
+                                    
+                                    // 링크 클릭 방지 핸들러 추가
+                                    const allLinks = newIframeDoc.querySelectorAll('a');
+                                    const preventLinkNavigation = (e: Event) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                      return false;
+                                    };
+                                    
+                                    allLinks.forEach(link => {
+                                      const htmlLink = link as HTMLElement;
+                                      const existingLinkHandler = linkClickHandlersRef.current.get(htmlLink);
+                                      if (existingLinkHandler) {
+                                        htmlLink.removeEventListener('click', existingLinkHandler, true);
+                                      }
+                                      htmlLink.addEventListener('click', preventLinkNavigation, true);
+                                      linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
+                                      htmlLink.style.cursor = 'pointer';
+                                    });
+                                    
+                                    // iframe 포커스 설정
+                                    if (newIframeDoc.body) {
                                       newIframeDoc.body.setAttribute('tabindex', '-1');
                                       newIframeDoc.body.focus();
                                     }
-                                  }, 50);
+                                  }, 100);
+                                  
+                                  setSelectedElements([]);
                                   
                                   console.log('↷ Step 5 컴포넌트 편집 다시 실행 완료. 남은 redo:', redoStackRef.current.length);
                                 } else {
