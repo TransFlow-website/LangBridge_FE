@@ -473,9 +473,8 @@ export default function Documents() {
             columns={columns}
             data={filteredAndSortedDocuments}
             onRowClick={(item) => {
-              // 행 클릭 시 문서 상세 관리 화면으로 이동 (나중에 구현)
-              console.log('문서 클릭:', item.id);
-              // navigate(`/documents/${item.id}`);
+              // 행 클릭 시 문서 상세 화면으로 이동
+              navigate(`/documents/${item.id}`);
             }}
             emptyMessage="문서가 없습니다."
           />

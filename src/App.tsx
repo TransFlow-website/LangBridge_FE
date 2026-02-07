@@ -13,6 +13,7 @@ import TranslationGuide from './pages/TranslationGuide';
 import NewTranslation from './pages/NewTranslation';
 import TranslationsPending from './pages/TranslationsPending';
 import Documents from './pages/Documents';
+import DocumentDetail from './pages/DocumentDetail';
 import TranslationWork from './pages/TranslationWork';
 import TranslationsWorking from './pages/TranslationsWorking';
 import Reviews from './pages/Reviews';
@@ -89,6 +90,11 @@ function App() {
                         <Route path="/documents" element={
                           <ErrorBoundary>
                             <Documents />
+                          </ErrorBoundary>
+                        } />
+                        <Route path="/documents/:id" element={
+                          <ErrorBoundary>
+                            <DocumentDetail />
                           </ErrorBoundary>
                         } />
                         <Route path="/translations/new" element={
