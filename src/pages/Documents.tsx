@@ -89,6 +89,7 @@ export default function Documents() {
     const fetchDocuments = async () => {
       try {
         setLoading(true);
+        // 전체 문서 조회 (백엔드에서 같은 URL의 최신 버전만 반환)
         const response = await documentApi.getAllDocuments();
         const converted = response.map(convertToDocumentListItem);
         setDocuments(converted);

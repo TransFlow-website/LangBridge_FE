@@ -177,6 +177,7 @@ export const documentApi = {
   getAllDocuments: async (params?: {
     status?: string;
     categoryId?: number;
+    excludePendingTranslation?: boolean;
   }): Promise<DocumentResponse[]> => {
     const queryParams = new URLSearchParams();
     if (params?.status) {
@@ -184,6 +185,9 @@ export const documentApi = {
     }
     if (params?.categoryId) {
       queryParams.append('categoryId', params.categoryId.toString());
+    }
+    if (params?.excludePendingTranslation) {
+      queryParams.append('excludePendingTranslation', 'true');
     }
     const queryString = queryParams.toString();
     const url = `/documents${queryString ? `?${queryString}` : ''}`;
