@@ -5207,18 +5207,14 @@ const NewTranslation: React.FC = () => {
     }
   };
 
-  // 초기 draft 상태 (localStorage에서 복원 또는 기본값)
+  // 초기 draft 상태 (항상 빈 상태로 시작 - 새 번역은 항상 새로운 작업)
   const [draft, setDraft] = useState<TranslationDraft>(() => {
-    const saved = loadDraftFromStorage();
-    if (saved) {
-      return saved;
-    }
     return {
-    url: '',
-    selectedAreas: [],
-    originalHtml: '',
-    originalHtmlWithIds: '', // STEP 2의 iframe HTML (data-transflow-id 포함)
-    state: DocumentState.DRAFT,
+      url: '',
+      selectedAreas: [],
+      originalHtml: '',
+      originalHtmlWithIds: '', // STEP 2의 iframe HTML (data-transflow-id 포함)
+      state: DocumentState.DRAFT,
     };
   });
   const [documentId, setDocumentId] = useState<number | null>(null);
@@ -5244,6 +5240,18 @@ const NewTranslation: React.FC = () => {
   }, [userRole]);
 
   // 사이드바 자동 접기 제거 (사용자가 직접 제어)
+
+  // ⭐ 새 번역 시작 시 localStorage draft 초기화 (다른 기기/브라우저에서 예전 데이터가 남아있는 문제 해결)
+  useEffect(() => {
+    // 컴포넌트 마운트 시 localStorage의 draft 초기화
+    // "새 번역 만들기"는 항상 새로운 작업을 시작하는 것이므로
+    try {
+      localStorage.removeItem('transflow-draft');
+      console.log('🗑️ 새 번역 시작: localStorage draft 초기화 완료');
+    } catch (e) {
+      console.warn('⚠️ localStorage 초기화 실패:', e);
+    }
+  }, []); // 컴포넌트 마운트 시 한 번만 실행
 
   // 권한 체크
   useEffect(() => {
@@ -5373,6 +5381,8 @@ const NewTranslation: React.FC = () => {
         setDraft((prev) => ({
           ...prev,
           originalHtml: htmlContent,
+          selectedAreas: [], // ⭐ 새로 크롤링하면 선택 영역 초기화
+          originalHtmlWithIds: '', // ⭐ 이전 HTML with IDs도 초기화
         }));
         setCurrentStep(2);
       } else {
