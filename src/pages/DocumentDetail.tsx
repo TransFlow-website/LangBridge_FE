@@ -20,11 +20,17 @@ export default function DocumentDetail() {
   // 버전별 HTML 콘텐츠
   const [originalHtml, setOriginalHtml] = useState<string>('');
   const [aiDraftHtml, setAiDraftHtml] = useState<string>('');
-  const [currentWorkHtml, setCurrentWorkHtml] = useState<string>('');
+  const [currentVersionHtml, setCurrentVersionHtml] = useState<string>('');
 
   // 패널 접기/전체화면 상태
   const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(new Set());
   const [fullscreenPanel, setFullscreenPanel] = useState<string | null>(null);
+  
+  // 현재 버전 정보
+  const [currentVersionInfo, setCurrentVersionInfo] = useState<{
+    version: DocumentVersionResponse | null;
+    versionType: string;
+  }>({ version: null, versionType: '' });
 
   // iframe refs
   const originalIframeRef = useRef<HTMLIFrameElement>(null);
@@ -74,25 +80,38 @@ export default function DocumentDetail() {
         const originalVersion = versionList.find(v => v.versionType === 'ORIGINAL');
         const aiDraftVersion = versionList.find(v => v.versionType === 'AI_DRAFT');
         
-        // 현재 진행 중인 작업 버전 결정
-        let currentWorkVersion: DocumentVersionResponse | undefined;
+        // 현재 버전 결정 (문서 상태에 따라)
+        let currentVersion: DocumentVersionResponse | undefined;
+        let currentVersionType = '';
         const status = doc.status as DocumentState;
         
-        if (status === DocumentState.IN_TRANSLATION || 
-            status === DocumentState.PENDING_REVIEW || 
-            status === DocumentState.APPROVED || 
-            status === DocumentState.PUBLISHED) {
-          // FINAL 버전 우선, 없으면 MANUAL_TRANSLATION
-          currentWorkVersion = versionList.find(v => v.versionType === 'FINAL') ||
-                              versionList.find(v => v.versionType === 'MANUAL_TRANSLATION');
+        if (status === DocumentState.PUBLISHED || status === DocumentState.APPROVED) {
+          // 게시 완료/승인 완료: FINAL 버전 우선
+          currentVersion = versionList.find(v => v.versionType === 'FINAL');
+          currentVersionType = currentVersion ? 'FINAL' : '';
+        } else if (status === DocumentState.PENDING_REVIEW) {
+          // 검토 중: MANUAL_TRANSLATION 또는 FINAL
+          currentVersion = versionList.find(v => v.versionType === 'FINAL') ||
+                          versionList.find(v => v.versionType === 'MANUAL_TRANSLATION');
+          currentVersionType = currentVersion?.versionType || '';
+        } else if (status === DocumentState.IN_TRANSLATION) {
+          // 번역 중: MANUAL_TRANSLATION (있다면), 없으면 AI_DRAFT
+          currentVersion = versionList.find(v => v.versionType === 'MANUAL_TRANSLATION') ||
+                          aiDraftVersion;
+          currentVersionType = currentVersion?.versionType || '';
         } else if (status === DocumentState.DRAFT || status === DocumentState.PENDING_TRANSLATION) {
-          // DRAFT나 PENDING_TRANSLATION은 AI_DRAFT를 표시
-          currentWorkVersion = aiDraftVersion;
+          // 초안/번역 대기: AI_DRAFT
+          currentVersion = aiDraftVersion;
+          currentVersionType = 'AI_DRAFT';
         }
 
         setOriginalHtml(originalVersion?.content || '');
         setAiDraftHtml(aiDraftVersion?.content || '');
-        setCurrentWorkHtml(currentWorkVersion?.content || '');
+        setCurrentVersionHtml(currentVersion?.content || '');
+        setCurrentVersionInfo({ 
+          version: currentVersion || null, 
+          versionType: currentVersionType 
+        });
 
       } catch (err: any) {
         console.error('문서 상세 정보 로드 실패:', err);
@@ -177,16 +196,16 @@ export default function DocumentDetail() {
     }
   }, [aiDraftHtml, collapsedPanels, fullscreenPanel]);
 
-  // 현재 작업 iframe 렌더링
+  // 현재 버전 iframe 렌더링
   useEffect(() => {
     const iframe = currentWorkIframeRef.current;
-    if (!iframe || !currentWorkHtml) return;
+    if (!iframe || !currentVersionHtml) return;
 
     const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
     if (iframeDoc) {
       try {
         iframeDoc.open();
-        iframeDoc.write(currentWorkHtml);
+        iframeDoc.write(currentVersionHtml);
         iframeDoc.close();
 
         // 경계선 제거 CSS 주입
@@ -208,27 +227,10 @@ export default function DocumentDetail() {
           iframeDoc.body.contentEditable = 'false';
         }
       } catch (error) {
-        console.error('❌ 현재 작업 iframe 오류:', error);
+        console.error('❌ 현재 버전 iframe 오류:', error);
       }
     }
-  }, [currentWorkHtml, collapsedPanels, fullscreenPanel]);
-
-  // 현재 작업 패널 제목 결정
-  const getCurrentWorkTitle = (): string => {
-    if (!document) return '현재 작업';
-    const status = document.status as DocumentState;
-    
-    if (status === DocumentState.DRAFT || status === DocumentState.PENDING_TRANSLATION) {
-      return 'AI 초벌 번역';
-    } else if (status === DocumentState.IN_TRANSLATION) {
-      return '번역 중';
-    } else if (status === DocumentState.PENDING_REVIEW) {
-      return '검토 대기';
-    } else if (status === DocumentState.APPROVED || status === DocumentState.PUBLISHED) {
-      return '최종 버전';
-    }
-    return '현재 작업';
-  };
+  }, [currentVersionHtml, collapsedPanels, fullscreenPanel]);
 
   if (loading) {
     return (
@@ -303,27 +305,35 @@ export default function DocumentDetail() {
     );
   }
 
+  // 현재 버전 제목 결정 (버전 번호 포함)
+  const getCurrentVersionTitle = (): string => {
+    if (currentVersionInfo.version) {
+      return `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`;
+    }
+    return '현재 버전';
+  };
+
   const panels = [
     { 
       id: 'original', 
-      title: '원본', 
+      title: '원문 (Version 0)', 
       ref: originalIframeRef, 
       html: originalHtml,
       hasContent: !!originalHtml,
     },
     { 
       id: 'aiDraft', 
-      title: 'AI 초벌 번역', 
+      title: 'AI 초벌 번역 (Version 1)', 
       ref: aiDraftIframeRef, 
       html: aiDraftHtml,
       hasContent: !!aiDraftHtml,
     },
     { 
-      id: 'currentWork', 
-      title: getCurrentWorkTitle(), 
+      id: 'currentVersion', 
+      title: getCurrentVersionTitle(), 
       ref: currentWorkIframeRef, 
-      html: currentWorkHtml,
-      hasContent: !!currentWorkHtml,
+      html: currentVersionHtml,
+      hasContent: !!currentVersionHtml,
     },
   ];
 
@@ -343,41 +353,120 @@ export default function DocumentDetail() {
         {/* 헤더 */}
         <div
           style={{
-            padding: '16px 24px',
+            padding: '12px 24px',
             backgroundColor: colors.surface,
             borderBottom: `1px solid ${colors.border}`,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
+            gap: '16px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {/* 왼쪽: 뒤로가기 + 문서 정보 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1 }}>
             <Button
               variant="secondary"
               onClick={() => navigate('/documents')}
-              style={{ fontSize: '12px' }}
+              style={{ fontSize: '12px', padding: '6px 12px' }}
             >
-              ← 목록으로
+              ← 뒤로가기
             </Button>
-            <div>
-              <h1
-                style={{
-                  fontSize: '18px',
-                  fontWeight: 600,
-                  color: '#000000',
-                  margin: 0,
-                  marginBottom: '4px',
-                }}
-              >
-                {document.title}
-              </h1>
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                <StatusBadge status={document.status as DocumentState} />
-                <span style={{ fontSize: '12px', color: colors.secondaryText }}>
-                  {document.originalUrl}
-                </span>
+            
+            {document && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#000000' }}>
+                  {document.title}
+                </div>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', color: colors.secondaryText }}>
+                    {document.categoryId ? `카테고리 ${document.categoryId}` : '미분류'} · {
+                      currentVersionInfo.version 
+                        ? `Version ${currentVersionInfo.version.versionNumber}`
+                        : document.hasVersions === false 
+                          ? '버전 없음'
+                          : 'Version 1'
+                    }
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+          
+          {/* 중앙: 문서 보기 옵션 (체크박스로 각 버전 표시/숨김) */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '24px',
+            padding: '6px 16px',
+            backgroundColor: '#F8F9FA',
+            borderRadius: '6px',
+            border: '1px solid #D3D3D3',
+          }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: colors.primaryText }}>문서 보기:</span>
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              fontSize: '13px', 
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}>
+              <input
+                type="checkbox"
+                checked={!collapsedPanels.has('original')}
+                onChange={() => togglePanel('original')}
+                style={{
+                  cursor: 'pointer',
+                  width: '16px',
+                  height: '16px',
+                }}
+              />
+              <span>원문 (Version 0)</span>
+            </label>
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              fontSize: '13px', 
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}>
+              <input
+                type="checkbox"
+                checked={!collapsedPanels.has('aiDraft')}
+                onChange={() => togglePanel('aiDraft')}
+                style={{ 
+                  cursor: 'pointer',
+                  width: '16px',
+                  height: '16px',
+                }}
+              />
+              <span>AI 초벌 번역 (Version 1)</span>
+            </label>
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              fontSize: '13px', 
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}>
+              <input
+                type="checkbox"
+                checked={!collapsedPanels.has('currentVersion')}
+                onChange={() => togglePanel('currentVersion')}
+                style={{ 
+                  cursor: 'pointer',
+                  width: '16px',
+                  height: '16px',
+                }}
+              />
+              <span>
+                {currentVersionInfo.version 
+                  ? `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`
+                  : '현재 버전'}
+              </span>
+            </label>
           </div>
         </div>
 

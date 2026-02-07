@@ -10,6 +10,7 @@ export interface CreateDocumentRequest {
   categoryId?: number;
   estimatedLength?: number;
   status?: string;
+  draftData?: string; // 임시저장 데이터 (JSON)
 }
 
 export interface DocumentResponse {
@@ -22,6 +23,9 @@ export interface DocumentResponse {
   status: string;
   currentVersionId?: number;
   estimatedLength?: number;
+  versionCount?: number;
+  hasVersions?: boolean;
+  draftData?: string; // 임시저장 데이터 (JSON)
   createdBy?: {
     id: number;
     email: string;
@@ -73,6 +77,7 @@ export interface UpdateDocumentRequest {
   status?: DocumentState;
   categoryId?: number;
   estimatedLength?: number;
+  draftData?: string; // 임시저장 데이터 (JSON)
 }
 
 export const documentApi = {

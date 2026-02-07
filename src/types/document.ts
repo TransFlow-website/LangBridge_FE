@@ -22,6 +22,7 @@ export interface DocumentListItem {
   originalUrl?: string;
   currentWorker?: string; // 현재 작업자 (IN_TRANSLATION 상태인 경우)
   currentVersionId?: number; // 현재 버전 ID
+  hasVersions?: boolean; // 버전 존재 여부
 }
 
 export interface DocumentFilter {

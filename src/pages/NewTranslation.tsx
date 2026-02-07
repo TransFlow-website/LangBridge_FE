@@ -7,7 +7,7 @@ import { UserRole } from '../types/user';
 import { DocumentState, TranslationDraft, SelectedArea } from '../types/translation';
 import { Button } from '../components/Button';
 import { WysiwygEditor, EditorMode } from '../components/WysiwygEditor';
-import { documentApi } from '../services/documentApi';
+import { documentApi, DocumentResponse } from '../services/documentApi';
 import { translationApi } from '../services/api';
 import { AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Palette, Quote, Minus, Link2, Highlighter, Image, Table, Code, Superscript, Subscript, MoreVertical, Undo2, Redo2 } from 'lucide-react';
 
@@ -18,7 +18,11 @@ const Step1CrawlingInput: React.FC<{
   onExecute: () => void;
   isLoading: boolean;
   loadingProgress?: number;
-}> = ({ url, setUrl, onExecute, isLoading, loadingProgress = 0 }) => {
+  draftDocuments?: DocumentResponse[];
+  onLoadDraft?: (doc: DocumentResponse) => void;
+}> = ({ url, setUrl, onExecute, isLoading, loadingProgress = 0, draftDocuments = [], onLoadDraft }) => {
+  const [showDraftList, setShowDraftList] = useState(false);
+
   return (
     <div
       style={{
@@ -30,6 +34,103 @@ const Step1CrawlingInput: React.FC<{
         gap: '24px',
       }}
     >
+      {/* 임시저장 문서 섹션 - 항상 표시 */}
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '600px',
+          padding: '16px',
+          backgroundColor: '#FFF9E6',
+          border: '1px solid #FFE5B4',
+          borderRadius: '8px',
+        }}
+      >
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginBottom: '12px',
+          minHeight: '28px',
+        }}>
+          <span style={{ 
+            fontSize: '13px', 
+            fontWeight: 600, 
+            color: '#8B4513',
+            lineHeight: '20px',
+            display: 'flex',
+            alignItems: 'center',
+          }}>
+            임시저장된 문서 ({draftDocuments.length}개)
+          </span>
+          {draftDocuments.length > 0 && (
+            <button
+              onClick={() => setShowDraftList(!showDraftList)}
+              style={{
+                padding: '4px 8px',
+                fontSize: '12px',
+                border: '1px solid #D3A86A',
+                borderRadius: '4px',
+                backgroundColor: '#FFFFFF',
+                color: '#8B4513',
+                cursor: 'pointer',
+                height: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                lineHeight: '1',
+              }}
+            >
+              {showDraftList ? '숨기기' : '보기'}
+            </button>
+          )}
+        </div>
+        {draftDocuments.length === 0 ? (
+          <div style={{ 
+            padding: '12px', 
+            textAlign: 'center', 
+            color: '#8B4513', 
+            fontSize: '12px',
+            fontStyle: 'italic',
+          }}>
+            임시저장된 문서가 없습니다.
+          </div>
+        ) : showDraftList && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {draftDocuments.map((doc) => (
+              <div
+                key={doc.id}
+                style={{
+                  padding: '12px',
+                  backgroundColor: '#FFFFFF',
+                  border: '1px solid #D3A86A',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#000000', marginBottom: '4px' }}>
+                    {doc.title}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#666' }}>
+                    {doc.originalUrl}
+                  </div>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => onLoadDraft?.(doc)}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  불러오기
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 기존 URL 입력 */}
       <div
         style={{
           width: '100%',
@@ -2721,19 +2822,30 @@ const Step6CreateDocument = React.forwardRef<
   {
     draft: TranslationDraft;
     onCreateDocument: (data: { title: string; categoryId?: number; estimatedLength?: number; status: string }) => void;
+    onSaveDraft?: (data: { title: string; categoryId?: number; estimatedLength?: number }) => void;
+    step6Data?: { title?: string; categoryId?: number; estimatedLength?: number };
     isCreating: boolean;
   }
->(({ draft, onCreateDocument, isCreating }, ref) => {
-  const [title, setTitle] = useState('');
-  const [categoryId, setCategoryId] = useState<string>('');
-  const [estimatedLength, setEstimatedLength] = useState<number>(0);
+>(({ draft, onCreateDocument, onSaveDraft, step6Data, isCreating }, ref) => {
+  const [title, setTitle] = useState(step6Data?.title || '');
+  const [categoryId, setCategoryId] = useState<string>(step6Data?.categoryId?.toString() || '');
+  const [estimatedLength, setEstimatedLength] = useState<number>(step6Data?.estimatedLength || 0);
   const [titleError, setTitleError] = useState<string>('');
   const [categories, setCategories] = useState<Array<{ id: number; name: string }>>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
 
+  // step6Data가 있으면 복원 (임시저장에서 불러올 때)
+  useEffect(() => {
+    if (step6Data) {
+      if (step6Data.title) setTitle(step6Data.title);
+      if (step6Data.categoryId) setCategoryId(step6Data.categoryId.toString());
+      if (step6Data.estimatedLength) setEstimatedLength(step6Data.estimatedLength);
+    }
+  }, [step6Data]);
+
   // 문서 제목 자동 파싱 및 번역
   useEffect(() => {
-    if (draft.originalHtml && !title && draft.targetLang) {
+    if (draft.originalHtml && !title && !step6Data?.title && draft.targetLang) {
       const parseAndTranslateTitle = async () => {
         try {
           const parser = new DOMParser();
@@ -3127,12 +3239,22 @@ const Step6CreateDocument = React.forwardRef<
                 return;
               }
               setTitleError('');
-              onCreateDocument({
-                title: title.trim(),
-                categoryId: categoryId ? parseInt(categoryId) : undefined,
-                estimatedLength: estimatedLength > 0 ? estimatedLength : undefined,
-                status: 'DRAFT',
-              });
+              if (onSaveDraft) {
+                // Step 6에서 임시저장 (버전 생성하지 않음)
+                onSaveDraft({
+                  title: title.trim(),
+                  categoryId: categoryId ? parseInt(categoryId) : undefined,
+                  estimatedLength: estimatedLength > 0 ? estimatedLength : undefined,
+                });
+              } else {
+                // 하위 호환성: 기존 방식
+                onCreateDocument({
+                  title: title.trim(),
+                  categoryId: categoryId ? parseInt(categoryId) : undefined,
+                  estimatedLength: estimatedLength > 0 ? estimatedLength : undefined,
+                  status: 'DRAFT',
+                });
+              }
             }}
             disabled={isCreating || !title.trim()}
             style={{ padding: '10px 20px' }}
@@ -5218,6 +5340,7 @@ const NewTranslation: React.FC = () => {
     };
   });
   const [documentId, setDocumentId] = useState<number | null>(null);
+  const [step6Data, setStep6Data] = useState<{ title?: string; categoryId?: number; estimatedLength?: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [isTranslating, setIsTranslating] = useState(false);
@@ -5226,6 +5349,7 @@ const NewTranslation: React.FC = () => {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [draftDocuments, setDraftDocuments] = useState<DocumentResponse[]>([]);
   const step6Ref = React.useRef<{ handleDraftSave: () => void; handlePublish: () => void } | null>(null);
   // Step 5용 패널 접기/펼치기 상태
   const [step5CollapsedPanels, setStep5CollapsedPanels] = useState<Set<string>>(new Set());
@@ -5252,6 +5376,32 @@ const NewTranslation: React.FC = () => {
       console.warn('⚠️ localStorage 초기화 실패:', e);
     }
   }, []); // 컴포넌트 마운트 시 한 번만 실행
+
+  // 임시저장 문서 로드
+  useEffect(() => {
+    const loadDraftDocuments = async () => {
+      try {
+        const allDocs = await documentApi.getAllDocuments();
+        console.log('📋 [NewTranslation] 전체 문서 조회:', allDocs.length, '개');
+        console.log('📋 [NewTranslation] 문서 샘플:', allDocs.slice(0, 3).map(doc => ({
+          id: doc.id,
+          title: doc.title,
+          status: doc.status,
+          hasVersions: doc.hasVersions,
+          versionCount: doc.versionCount
+        })));
+        const draftOnlyDocs = allDocs.filter(doc => 
+          doc.status === 'DRAFT' && doc.hasVersions !== true
+        );
+        console.log('📋 [NewTranslation] 임시저장 문서 필터링 결과:', draftOnlyDocs.length, '개');
+        setDraftDocuments(draftOnlyDocs);
+        console.log('📋 임시저장 문서 로드 완료:', draftOnlyDocs.length, '개');
+      } catch (error) {
+        console.error('임시저장 문서 로드 실패:', error);
+      }
+    };
+    loadDraftDocuments();
+  }, []);
 
   // 권한 체크
   useEffect(() => {
@@ -5513,9 +5663,9 @@ const NewTranslation: React.FC = () => {
         }
       }
       
-      // 다음으로 넘어갈 때는 자동 저장 (STEP 3 포함)
+      // 다음으로 넘어갈 때는 자동 저장 (STEP 3 포함) - 모달 표시 안 함
       if (hasUnsavedChanges) {
-        await handleSaveDraft();
+        await handleSaveDraft(undefined, true); // isAutoSave = true
       }
       setCurrentStep(currentStep + 1);
     }
@@ -5600,38 +5750,146 @@ const NewTranslation: React.FC = () => {
     }
   };
 
-  const handleSaveDraft = async () => {
-    if (!documentId) {
-      // 문서가 없으면 먼저 생성 (버전은 생성하지 않음 - Step 6에서만 생성)
-      try {
+  // 임시저장 문서 불러오기
+  const handleLoadDraft = async (doc: DocumentResponse) => {
+    try {
+      console.log('🔄 임시저장 문서 불러오기 시작:', doc.id);
+      console.log('📦 draftData:', doc.draftData ? `존재 (${doc.draftData.length}자)` : '없음');
+      console.log('📦 draftData 내용:', doc.draftData);
+      
+      // draftData가 있고 빈 문자열이 아닌 경우에만 파싱
+      if (doc.draftData && doc.draftData.trim() !== '') {
+        try {
+          // 저장된 draftData가 있으면 파싱해서 복원
+          const parsedData = JSON.parse(doc.draftData);
+          console.log('✅ JSON 파싱 성공:', parsedData);
+          
+          const savedStep = parsedData.currentStep || 1;
+          const savedDraft = parsedData.draft || {};
+          const savedStep6Data = parsedData.step6Data || null;
+
+          setDraft({
+            url: savedDraft.url || doc.originalUrl,
+            selectedAreas: savedDraft.selectedAreas || [],
+            originalHtml: savedDraft.originalHtml || '',
+            originalHtmlWithIds: savedDraft.originalHtmlWithIds || '',
+            editedHtml: savedDraft.editedHtml,
+            translatedHtml: savedDraft.translatedHtml,
+            sourceLang: savedDraft.sourceLang || doc.sourceLang || 'auto',
+            targetLang: savedDraft.targetLang || doc.targetLang || 'ko',
+            state: savedDraft.state || DocumentState.DRAFT,
+          });
+          setDocumentId(doc.id);
+          setCurrentStep(savedStep);
+          
+          // Step 6 데이터 저장 (Step 6 컴포넌트에서 사용)
+          if (savedStep === 6 && savedStep6Data) {
+            setStep6Data(savedStep6Data);
+          }
+          
+          console.log('✅ 임시저장 문서 불러오기 완료:', doc.id, 'Step', savedStep);
+          alert('임시저장 문서를 불러왔습니다.');
+        } catch (parseError) {
+          console.error('❌ JSON 파싱 실패:', parseError);
+          console.error('❌ 손상된 draftData:', doc.draftData);
+          throw new Error(`JSON 파싱 실패: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+        }
+      } else {
+        // draftData가 없거나 빈 문자열이면 기본값으로 복원 (하위 호환성)
+        console.log('⚠️ draftData가 없거나 비어있어 기본값으로 복원');
+        setDraft({
+          url: doc.originalUrl,
+          sourceLang: doc.sourceLang || 'auto',
+          targetLang: doc.targetLang || 'ko',
+          selectedAreas: [],
+          originalHtml: '',
+          originalHtmlWithIds: '',
+          state: DocumentState.DRAFT,
+        });
+        setDocumentId(doc.id);
+        setCurrentStep(1);
+        console.log('✅ 임시저장 문서 불러오기 완료 (기본값):', doc.id);
+        alert('임시저장 문서를 불러왔습니다. (기본값으로 복원)');
+      }
+    } catch (error) {
+      console.error('❌ 임시저장 문서 불러오기 실패:', error);
+      console.error('❌ 오류 상세:', error instanceof Error ? error.message : String(error));
+      alert(`임시저장 문서를 불러오는데 실패했습니다.\n오류: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleSaveDraft = async (step6Data?: { title?: string; categoryId?: number; estimatedLength?: number }, isAutoSave: boolean = false) => {
+    try {
+      // draft 상태와 currentStep을 JSON으로 저장
+      const draftData = JSON.stringify({
+        currentStep,
+        draft: {
+          url: draft.url,
+          selectedAreas: draft.selectedAreas,
+          originalHtml: draft.originalHtml,
+          originalHtmlWithIds: draft.originalHtmlWithIds,
+          editedHtml: draft.editedHtml,
+          translatedHtml: draft.translatedHtml,
+          sourceLang: draft.sourceLang,
+          targetLang: draft.targetLang,
+          state: draft.state,
+        },
+        // Step 6의 입력값들도 저장
+        step6Data: step6Data || null,
+      });
+
+      // Step 6에서 임시저장할 때는 제목도 업데이트
+      const documentTitle = step6Data?.title || `번역 문서 - ${new Date().toLocaleString()}`;
+
+      if (!documentId) {
+        // 문서가 없으면 먼저 생성 (버전은 생성하지 않음 - Step 6에서만 생성)
         const response = await documentApi.createDocument({
-          title: `번역 문서 - ${new Date().toLocaleString()}`,
+          title: documentTitle,
           originalUrl: draft.url,
           sourceLang: draft.sourceLang || 'auto',
           targetLang: draft.targetLang || 'ko',
+          status: 'DRAFT',
+          categoryId: step6Data?.categoryId,
+          estimatedLength: step6Data?.estimatedLength,
+          draftData: draftData,
         });
         setDocumentId(response.id);
-        
-        // ⭐ 버전은 생성하지 않음 (Step 6에서만 생성)
+        console.log('✅ 임시저장 완료 (문서 생성):', response.id, 'Step', currentStep);
+      } else {
+        // 문서가 있으면 문서만 업데이트 (버전은 생성하지 않음)
+        const updateData: any = {
+          draftData: draftData, // 항상 draftData는 업데이트
+        };
+        // Step 6 데이터가 있으면 추가
+        if (step6Data) {
+          if (step6Data.title) updateData.title = step6Data.title;
+          if (step6Data.categoryId) updateData.categoryId = step6Data.categoryId;
+          if (step6Data.estimatedLength) updateData.estimatedLength = step6Data.estimatedLength;
+        }
+        await documentApi.updateDocument(documentId, updateData);
+        console.log('✅ 임시저장 완료 (문서 업데이트):', documentId, 'Step', currentStep);
+      }
 
-        setLastSaved(new Date());
-        setHasUnsavedChanges(false);
-        setSaveError(null);
-      } catch (error: any) {
-        console.error('Save error:', error);
-        setSaveError(error?.response?.data?.message || '저장 실패');
+      setLastSaved(new Date());
+      setHasUnsavedChanges(false);
+      setSaveError(null);
+
+      // ⭐ 임시저장 문서 목록 다시 로드
+      const allDocs = await documentApi.getAllDocuments();
+      const draftOnlyDocs = allDocs.filter(doc => 
+        doc.status === 'DRAFT' && doc.hasVersions !== true
+      );
+      setDraftDocuments(draftOnlyDocs);
+      console.log('✅ 임시저장 목록 갱신 완료:', draftOnlyDocs.length, '개');
+      
+      // ⭐ 임시저장 완료 모달 표시 (자동 저장이 아닐 때만)
+      if (!isAutoSave) {
+        alert('임시저장되었습니다.');
       }
-    } else {
-      // 문서가 있으면 문서만 업데이트 (버전은 생성하지 않음)
-      try {
-        // ⭐ 버전 생성 로직 제거 - Step 6에서만 버전 생성
-        setLastSaved(new Date());
-        setHasUnsavedChanges(false);
-        setSaveError(null);
-      } catch (error: any) {
-        console.error('Save error:', error);
-        setSaveError(error?.response?.data?.message || '저장 실패');
-      }
+    } catch (error: any) {
+      console.error('Save error:', error);
+      setSaveError(error?.response?.data?.message || '저장 실패');
+      alert(`임시저장에 실패했습니다.\n오류: ${error?.response?.data?.message || error.message || '저장 실패'}`);
     }
   };
 
@@ -5649,12 +5907,14 @@ const NewTranslation: React.FC = () => {
             onExecute={handleCrawling}
             isLoading={isLoading}
             loadingProgress={loadingProgress}
+            draftDocuments={draftDocuments}
+            onLoadDraft={handleLoadDraft}
           />
         );
       case 2:
         return (
           <Step2AreaSelection
-            html={draft.originalHtml}
+            html={draft.originalHtmlWithIds || draft.originalHtml}
             selectedAreas={draft.selectedAreas}
             onAreaSelect={handleAreaSelect}
             onAreaRemove={handleAreaRemove}
@@ -5718,6 +5978,11 @@ const NewTranslation: React.FC = () => {
               // Step6CreateDocument에서 status를 포함하여 전달
               handleCreateDocument(data);
             }}
+            onSaveDraft={(data) => {
+              // Step 6에서 임시저장
+              handleSaveDraft(data);
+            }}
+            step6Data={step6Data || undefined}
             isCreating={isCreating}
           />
         );
@@ -5906,7 +6171,7 @@ const NewTranslation: React.FC = () => {
 
         {/* 오른쪽: 임시 저장 버튼 */}
         <div>
-          <Button variant="secondary" onClick={handleSaveDraft} style={{ fontSize: '12px', padding: '4px 8px' }}>
+          <Button variant="secondary" onClick={() => handleSaveDraft()} style={{ fontSize: '12px', padding: '4px 8px' }}>
             임시 저장
           </Button>
         </div>
