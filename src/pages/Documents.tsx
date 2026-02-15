@@ -127,7 +127,29 @@ export default function Documents() {
     const fetchDocuments = async () => {
       try {
         setLoading(true);
-        const response = await documentApi.getAllDocuments();
+        // 검색어가 있으면 백엔드 검색 API 사용
+        const params: { status?: string; categoryId?: number; title?: string } = {};
+        if (searchTerm.trim()) {
+          params.title = searchTerm.trim();
+        }
+        // 상태 필터
+        if (selectedStatus !== '전체') {
+          const statusMap: Record<string, string> = {
+            '번역 대기': 'PENDING_TRANSLATION',
+            '번역 중': 'IN_TRANSLATION',
+            '검토 중': 'PENDING_REVIEW',
+            '승인 완료': 'APPROVED',
+            '게시 완료': 'PUBLISHED',
+          };
+          params.status = statusMap[selectedStatus] || selectedStatus;
+        }
+        // 카테고리 필터
+        if (selectedCategory !== '전체') {
+          // 카테고리 이름을 ID로 변환 (임시로 1 사용, 나중에 카테고리 API로 가져오기)
+          params.categoryId = 1;
+        }
+        
+        const response = await documentApi.getAllDocuments(params);
         const converted = response.map(convertToDocumentListItem);
         setDocuments(converted);
         
@@ -145,7 +167,7 @@ export default function Documents() {
     };
 
     fetchDocuments();
-  }, []);
+  }, [searchTerm, selectedStatus, selectedCategory]);
 
   // 찜 상태 및 락 상태 로드
   useEffect(() => {
@@ -189,13 +211,7 @@ export default function Documents() {
   const filteredAndSortedDocuments = useMemo(() => {
     let filtered = [...documents];
 
-    // 검색 필터 (제목 검색)
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter((doc) => 
-        doc.title.toLowerCase().includes(term)
-      );
-    }
+    // 검색은 백엔드에서 처리하므로 프론트엔드에서는 추가 필터링만 수행
 
     // 카테고리 필터
     if (selectedCategory !== '전체') {
