@@ -7,6 +7,11 @@ export interface TermDictionaryResponse {
   sourceLang: string;
   targetLang: string;
   description?: string;
+  category?: string; // 구분(분야)
+  articleTitle?: string; // 기사제목
+  articleSource?: string; // 출처(날짜)
+  articleLink?: string; // 기사링크
+  memo?: string; // 메모
   deeplGlossaryId?: string; // DeepL Glossary ID
   createdBy?: {
     id: number;
@@ -23,6 +28,11 @@ export interface CreateTermRequest {
   sourceLang: string;
   targetLang: string;
   description?: string;
+  category?: string;
+  articleTitle?: string;
+  articleSource?: string;
+  articleLink?: string;
+  memo?: string;
 }
 
 export interface UpdateTermRequest {
@@ -31,16 +41,46 @@ export interface UpdateTermRequest {
   sourceLang?: string;
   targetLang?: string;
   description?: string;
+  category?: string;
+  articleTitle?: string;
+  articleSource?: string;
+  articleLink?: string;
+  memo?: string;
+}
+
+export interface BatchCreateTermRequest {
+  sourceLang: string;
+  targetLang: string;
+  termsText: string; // TSV 형식: 구분\t영어\t한국어\t기사제목\t출처\t기사링크\t메모
+}
+
+export interface BatchCreateTermResponse {
+  success: boolean;
+  successCount: number;
+  failedCount: number;
+  errors: string[];
+}
+
+export interface TermDictionaryPageResponse {
+  content: TermDictionaryResponse[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  first: boolean;
+  last: boolean;
 }
 
 export const termApi = {
   /**
-   * 용어 목록 조회
+   * 용어 목록 조회 (페이지네이션)
    */
   getAllTerms: async (params?: {
     sourceLang?: string;
     targetLang?: string;
-  }): Promise<TermDictionaryResponse[]> => {
+    page?: number;
+    size?: number;
+  }): Promise<TermDictionaryPageResponse> => {
     const queryParams = new URLSearchParams();
     if (params?.sourceLang) {
       queryParams.append('sourceLang', params.sourceLang);
@@ -48,9 +88,15 @@ export const termApi = {
     if (params?.targetLang) {
       queryParams.append('targetLang', params.targetLang);
     }
+    if (params?.page !== undefined) {
+      queryParams.append('page', params.page.toString());
+    }
+    if (params?.size !== undefined) {
+      queryParams.append('size', params.size.toString());
+    }
     const queryString = queryParams.toString();
     const url = `/terms${queryString ? `?${queryString}` : ''}`;
-    const response = await apiClient.get<TermDictionaryResponse[]>(url);
+    const response = await apiClient.get<TermDictionaryPageResponse>(url);
     return response.data;
   },
 
@@ -96,6 +142,14 @@ export const termApi = {
    */
   updateTerm: async (id: number, request: UpdateTermRequest): Promise<TermDictionaryResponse> => {
     const response = await apiClient.put<TermDictionaryResponse>(`/terms/${id}`, request);
+    return response.data;
+  },
+
+  /**
+   * 용어 대량 추가
+   */
+  createTermsBatch: async (request: BatchCreateTermRequest): Promise<BatchCreateTermResponse> => {
+    const response = await apiClient.post<BatchCreateTermResponse>('/terms/batch', request);
     return response.data;
   },
 
