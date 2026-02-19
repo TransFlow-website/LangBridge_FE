@@ -30,7 +30,7 @@ export default function Glossary() {
         if (selectedSourceLang) params.sourceLang = selectedSourceLang;
         if (selectedTargetLang) params.targetLang = selectedTargetLang;
         const response = await termApi.getAllTerms(params);
-        setTerms(response);
+        setTerms(response.content ?? []);
       } catch (error) {
         console.error('용어 목록 조회 실패:', error);
         setTerms([]);

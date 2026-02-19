@@ -201,6 +201,7 @@ export const documentApi = {
     }
     if (params?.excludePendingTranslation) {
       queryParams.append('excludePendingTranslation', 'true');
+    }
     if (params?.title) {
       queryParams.append('title', params.title);
     }
