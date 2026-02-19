@@ -9,6 +9,7 @@ import {
   BookOpen,
   Activity,
   Settings,
+  Users,
   ChevronDown,
   ChevronUp,
   Menu,
@@ -39,6 +40,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string; size?: n
   BookOpen,
   Activity,
   Settings,
+  Users,
 };
 
 export const Sidebar: React.FC = () => {

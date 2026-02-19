@@ -44,6 +44,13 @@ export const sidebarMenu: MenuItem[] = [
     ],
   },
   {
+    key: 'user_management',
+    label: '사용자 관리',
+    path: '/users',
+    roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN],
+    icon: 'Users',
+  },
+  {
     key: 'new_translation',
     label: '새 번역 등록',
     path: '/translations/new',

@@ -177,6 +177,7 @@ export const documentApi = {
   getAllDocuments: async (params?: {
     status?: string;
     categoryId?: number;
+    title?: string;
   }): Promise<DocumentResponse[]> => {
     const queryParams = new URLSearchParams();
     if (params?.status) {
@@ -184,6 +185,9 @@ export const documentApi = {
     }
     if (params?.categoryId) {
       queryParams.append('categoryId', params.categoryId.toString());
+    }
+    if (params?.title) {
+      queryParams.append('title', params.title);
     }
     const queryString = queryParams.toString();
     const url = `/documents${queryString ? `?${queryString}` : ''}`;
@@ -219,6 +223,14 @@ export const documentApi = {
   isFavorite: async (documentId: number): Promise<boolean> => {
     const response = await apiClient.get<{ isFavorite: boolean }>(`/documents/${documentId}/favorite`);
     return response.data.isFavorite;
+  },
+
+  /**
+   * 문서 삭제
+   */
+  deleteDocument: async (id: number): Promise<{ success: boolean; message: string }> => {
+    const response = await apiClient.delete<{ success: boolean; message: string }>(`/documents/${id}`);
+    return response.data;
   },
 };
 

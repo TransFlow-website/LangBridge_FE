@@ -92,5 +92,15 @@ export const translationWorkApi = {
     );
     return response.data;
   },
+
+  /**
+   * 관리자 락 강제 해제
+   */
+  releaseLockByAdmin: async (documentId: number): Promise<{ success: boolean; message: string }> => {
+    const response = await apiClient.delete<{ success: boolean; message: string }>(
+      `/documents/${documentId}/lock/admin`
+    );
+    return response.data;
+  },
 };
 

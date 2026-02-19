@@ -1,6 +1,6 @@
 import React, { ReactNode } from 'react';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'disabled';
+export type ButtonVariant = 'primary' | 'secondary' | 'disabled' | 'danger';
 
 interface ButtonProps {
   children: ReactNode;
@@ -42,6 +42,13 @@ export const Button: React.FC<ButtonProps> = ({
           border: 'none',
           cursor: 'not-allowed',
         };
+      case 'danger':
+        return {
+          background: '#dc3545',
+          color: '#FFFFFF',
+          border: 'none',
+          cursor: 'pointer',
+        };
     }
   };
 
@@ -52,6 +59,8 @@ export const Button: React.FC<ButtonProps> = ({
       onClick(e);
     }
   };
+
+  const isDisabled = variant === 'disabled';
 
   return (
     <button
@@ -69,7 +78,7 @@ export const Button: React.FC<ButtonProps> = ({
         fontWeight: 500,
         ...style,
       }}
-      disabled={variant === 'disabled'}
+      disabled={isDisabled}
     >
       {children}
     </button>
