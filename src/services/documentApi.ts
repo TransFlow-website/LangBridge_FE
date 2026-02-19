@@ -10,6 +10,7 @@ export interface CreateDocumentRequest {
   categoryId?: number;
   estimatedLength?: number;
   status?: string;
+  draftData?: string; // 임시저장 데이터 (JSON)
 }
 
 export interface DocumentResponse {
@@ -22,6 +23,9 @@ export interface DocumentResponse {
   status: string;
   currentVersionId?: number;
   estimatedLength?: number;
+  versionCount?: number;
+  hasVersions?: boolean;
+  draftData?: string; // 임시저장 데이터 (JSON)
   createdBy?: {
     id: number;
     email: string;
@@ -73,6 +77,7 @@ export interface UpdateDocumentRequest {
   status?: DocumentState;
   categoryId?: number;
   estimatedLength?: number;
+  draftData?: string; // 임시저장 데이터 (JSON)
 }
 
 export const documentApi = {
@@ -120,6 +125,13 @@ export const documentApi = {
       request
     );
     return response.data;
+  },
+
+  /**
+   * 문서의 모든 버전 삭제
+   */
+  deleteAllVersions: async (documentId: number): Promise<void> => {
+    await apiClient.delete(`/documents/${documentId}/versions`);
   },
 
   /**
@@ -177,6 +189,7 @@ export const documentApi = {
   getAllDocuments: async (params?: {
     status?: string;
     categoryId?: number;
+    excludePendingTranslation?: boolean;
     title?: string;
   }): Promise<DocumentResponse[]> => {
     const queryParams = new URLSearchParams();
@@ -186,6 +199,8 @@ export const documentApi = {
     if (params?.categoryId) {
       queryParams.append('categoryId', params.categoryId.toString());
     }
+    if (params?.excludePendingTranslation) {
+      queryParams.append('excludePendingTranslation', 'true');
     if (params?.title) {
       queryParams.append('title', params.title);
     }

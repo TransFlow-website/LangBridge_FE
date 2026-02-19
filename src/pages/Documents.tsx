@@ -16,6 +16,7 @@ import { translationWorkApi } from '../services/translationWorkApi';
 const categories = ['전체', '웹사이트', '마케팅', '고객지원', '기술문서'];
 const statuses = [
   '전체',
+  '임시저장',
   '번역 대기',
   '번역 중',
   '검토 중',
@@ -54,6 +55,7 @@ const convertToDocumentListItem = (doc: DocumentResponse): DocumentListItem => {
     assignedManager: doc.lastModifiedBy?.name,
     isFinal: false, // 나중에 버전 정보에서 가져오기
     originalUrl: doc.originalUrl,
+    hasVersions: doc.hasVersions === true, // null이나 undefined는 false로 처리
   };
 };
 
@@ -127,30 +129,31 @@ export default function Documents() {
     const fetchDocuments = async () => {
       try {
         setLoading(true);
-        // 검색어가 있으면 백엔드 검색 API 사용
-        const params: { status?: string; categoryId?: number; title?: string } = {};
-        if (searchTerm.trim()) {
-          params.title = searchTerm.trim();
-        }
-        // 상태 필터
-        if (selectedStatus !== '전체') {
-          const statusMap: Record<string, string> = {
-            '번역 대기': 'PENDING_TRANSLATION',
-            '번역 중': 'IN_TRANSLATION',
-            '검토 중': 'PENDING_REVIEW',
-            '승인 완료': 'APPROVED',
-            '게시 완료': 'PUBLISHED',
-          };
-          params.status = statusMap[selectedStatus] || selectedStatus;
-        }
-        // 카테고리 필터
-        if (selectedCategory !== '전체') {
-          // 카테고리 이름을 ID로 변환 (임시로 1 사용, 나중에 카테고리 API로 가져오기)
-          params.categoryId = 1;
-        }
-        
-        const response = await documentApi.getAllDocuments(params);
+// 전체 문서 조회 (백엔드에서 같은 URL의 최신 버전만 반환 가능)
+const params: { status?: string; categoryId?: number; title?: string } = {};
+if (searchTerm.trim()) {
+  params.title = searchTerm.trim();
+}
+if (selectedStatus !== '전체') {
+  const statusMap: Record<string, string> = {
+    '번역 대기': 'PENDING_TRANSLATION',
+    '번역 중': 'IN_TRANSLATION',
+    '검토 중': 'PENDING_REVIEW',
+    '승인 완료': 'APPROVED',
+    '게시 완료': 'PUBLISHED',
+  };
+  params.status = statusMap[selectedStatus] || selectedStatus;
+}
+if (selectedCategory !== '전체') {
+  params.categoryId = 1;
+}
+
+const response = await documentApi.getAllDocuments(params);
         const converted = response.map(convertToDocumentListItem);
+        const draftOnlyCount = converted.filter(doc => 
+          doc.status === DocumentState.DRAFT && (doc.hasVersions === false || doc.hasVersions === undefined)
+        ).length;
+        console.log('📋 임시저장 문서 개수:', draftOnlyCount);
         setDocuments(converted);
         
         // 관리자 목록 추출 (중복 제거)
@@ -220,14 +223,21 @@ export default function Documents() {
 
     // 상태 필터
     if (selectedStatus !== '전체') {
-      const statusMap: Record<string, DocumentState> = {
-        '번역 대기': DocumentState.PENDING_TRANSLATION,
-        '번역 중': DocumentState.IN_TRANSLATION,
-        '검토 중': DocumentState.PENDING_REVIEW,
-        '승인 완료': DocumentState.APPROVED,
-        '게시 완료': DocumentState.PUBLISHED,
-      };
-      filtered = filtered.filter((doc) => doc.status === statusMap[selectedStatus]);
+      if (selectedStatus === '임시저장') {
+        // DRAFT 상태이고 버전이 없는 문서만
+        filtered = filtered.filter((doc) => 
+          doc.status === DocumentState.DRAFT && doc.hasVersions === false
+        );
+      } else {
+        const statusMap: Record<string, DocumentState> = {
+          '번역 대기': DocumentState.PENDING_TRANSLATION,
+          '번역 중': DocumentState.IN_TRANSLATION,
+          '검토 중': DocumentState.PENDING_REVIEW,
+          '승인 완료': DocumentState.APPROVED,
+          '게시 완료': DocumentState.PUBLISHED,
+        };
+        filtered = filtered.filter((doc) => doc.status === statusMap[selectedStatus]);
+      }
     }
 
     // 담당자 필터
@@ -467,6 +477,7 @@ export default function Documents() {
       width: '25%',
       render: (item) => {
         const isFavorite = favoriteStatus.get(item.id) || false;
+        const isDraftOnly = item.status === DocumentState.DRAFT && item.hasVersions === false;
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
@@ -486,9 +497,25 @@ export default function Documents() {
             >
               {isFavorite ? '★' : '☆'}
             </button>
-            <span style={{ fontWeight: 500, color: '#000000' }}>
-              <HighlightText text={item.title} searchTerm={searchTerm} />
-            </span>
+{isDraftOnly && (
+  <span style={{
+    padding: '2px 6px',
+    backgroundColor: '#FFE5B4',
+    color: '#8B4513',
+    fontSize: '10px',
+    borderRadius: '4px',
+    fontWeight: 600
+  }}>
+    임시저장
+  </span>
+)}
+<span style={{ 
+  fontWeight: 500, 
+  color: isDraftOnly ? '#999' : '#000000',
+  fontStyle: isDraftOnly ? 'italic' : 'normal'
+}}>
+  <HighlightText text={item.title} searchTerm={searchTerm} />
+</span>
           </div>
         );
       },
@@ -505,7 +532,27 @@ export default function Documents() {
       key: 'status',
       label: '상태',
       width: '12%',
-      render: (item) => <StatusBadge status={item.status} />,
+      render: (item) => {
+        const isDraftOnly = item.status === DocumentState.DRAFT && item.hasVersions === false;
+        if (isDraftOnly) {
+          return (
+            <span
+              style={{
+                display: 'inline-block',
+                padding: '4px 8px',
+                borderRadius: '4px',
+                fontSize: '12px',
+                fontWeight: 500,
+                backgroundColor: '#FFE5B4',
+                color: '#8B4513',
+              }}
+            >
+              임시저장
+            </span>
+          );
+        }
+        return <StatusBadge status={item.status} />;
+      },
     },
     {
       key: 'progress',
@@ -905,9 +952,8 @@ export default function Documents() {
             columns={columns}
             data={filteredAndSortedDocuments}
             onRowClick={(item) => {
-              // 행 클릭 시 문서 상세 관리 화면으로 이동 (나중에 구현)
-              console.log('문서 클릭:', item.id);
-              // navigate(`/documents/${item.id}`);
+              // 행 클릭 시 문서 상세 화면으로 이동
+              navigate(`/documents/${item.id}`);
             }}
             emptyMessage="문서가 없습니다."
           />

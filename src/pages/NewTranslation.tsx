@@ -7,7 +7,7 @@ import { UserRole } from '../types/user';
 import { DocumentState, TranslationDraft, SelectedArea } from '../types/translation';
 import { Button } from '../components/Button';
 import { WysiwygEditor, EditorMode } from '../components/WysiwygEditor';
-import { documentApi } from '../services/documentApi';
+import { documentApi, DocumentResponse } from '../services/documentApi';
 import { translationApi } from '../services/api';
 import { AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Palette, Quote, Minus, Link2, Highlighter, Image, Table, Code, Superscript, Subscript, MoreVertical, Undo2, Redo2 } from 'lucide-react';
 
@@ -18,7 +18,11 @@ const Step1CrawlingInput: React.FC<{
   onExecute: () => void;
   isLoading: boolean;
   loadingProgress?: number;
-}> = ({ url, setUrl, onExecute, isLoading, loadingProgress = 0 }) => {
+  draftDocuments?: DocumentResponse[];
+  onLoadDraft?: (doc: DocumentResponse) => void;
+}> = ({ url, setUrl, onExecute, isLoading, loadingProgress = 0, draftDocuments = [], onLoadDraft }) => {
+  const [showDraftList, setShowDraftList] = useState(false);
+
   return (
     <div
       style={{
@@ -30,6 +34,103 @@ const Step1CrawlingInput: React.FC<{
         gap: '24px',
       }}
     >
+      {/* 임시저장 문서 섹션 - 항상 표시 */}
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '600px',
+          padding: '16px',
+          backgroundColor: '#FFF9E6',
+          border: '1px solid #FFE5B4',
+          borderRadius: '8px',
+        }}
+      >
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginBottom: '12px',
+          minHeight: '28px',
+        }}>
+          <span style={{ 
+            fontSize: '13px', 
+            fontWeight: 600, 
+            color: '#8B4513',
+            lineHeight: '20px',
+            display: 'flex',
+            alignItems: 'center',
+          }}>
+            임시저장된 문서 ({draftDocuments.length}개)
+          </span>
+          {draftDocuments.length > 0 && (
+            <button
+              onClick={() => setShowDraftList(!showDraftList)}
+              style={{
+                padding: '4px 8px',
+                fontSize: '12px',
+                border: '1px solid #D3A86A',
+                borderRadius: '4px',
+                backgroundColor: '#FFFFFF',
+                color: '#8B4513',
+                cursor: 'pointer',
+                height: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                lineHeight: '1',
+              }}
+            >
+              {showDraftList ? '숨기기' : '보기'}
+            </button>
+          )}
+        </div>
+        {draftDocuments.length === 0 ? (
+          <div style={{ 
+            padding: '12px', 
+            textAlign: 'center', 
+            color: '#8B4513', 
+            fontSize: '12px',
+            fontStyle: 'italic',
+          }}>
+            임시저장된 문서가 없습니다.
+          </div>
+        ) : showDraftList && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {draftDocuments.map((doc) => (
+              <div
+                key={doc.id}
+                style={{
+                  padding: '12px',
+                  backgroundColor: '#FFFFFF',
+                  border: '1px solid #D3A86A',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#000000', marginBottom: '4px' }}>
+                    {doc.title}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#666' }}>
+                    {doc.originalUrl}
+                  </div>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => onLoadDraft?.(doc)}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  불러오기
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 기존 URL 입력 */}
       <div
         style={{
           width: '100%',
@@ -84,58 +185,50 @@ const Step2AreaSelection: React.FC<{
   const [hoveredAreaId, setHoveredAreaId] = React.useState<string | null>(null);
   const [pageLoaded, setPageLoaded] = React.useState(false);
   
-  // 이벤트 리스너를 추적하기 위한 ref
   const listenersAttached = React.useRef(false);
+  const initialRestoreDone = React.useRef(false);
+  const isUserInteraction = React.useRef(false);
   
-  // selectedAreas가 변경될 때마다 현재 iframe HTML 저장 및 선택 상태 동기화
+  // 초기 로드 시 한 번만 선택 상태 복원
   React.useEffect(() => {
-    if (!iframeRef.current || !pageLoaded) return;
-    
-      const iframe = iframeRef.current;
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!iframeDoc) return;
-    
-    // ⭐ iframe의 선택 상태를 selectedAreas와 동기화
-    // 1. 모든 선택 상태 제거 (초기화 시 자동 선택 문제 해결)
-    iframeDoc.querySelectorAll('.transflow-selected').forEach(el => {
-      el.classList.remove('transflow-selected');
-    });
-    
-    // 2. selectedAreas에 있는 요소만 다시 선택 표시
-    const selectedIds = new Set(selectedAreas.map(area => area.id));
-    selectedIds.forEach(id => {
-      const el = iframeDoc.querySelector(`[data-transflow-id="${id}"]`) as HTMLElement;
-      if (el) {
-        el.classList.add('transflow-selected');
-      }
-    });
-    
-    console.log('🔄 Step 2 선택 상태 동기화 완료:', selectedIds.size, '개 영역');
-    
-    // 3. iframe HTML 저장
-    if (onHtmlUpdate && selectedAreas.length > 0) {
-        const currentHtml = iframeDoc.documentElement.outerHTML;
-        onHtmlUpdate(currentHtml);
-        console.log('💾 STEP 2 iframe HTML 저장 완료 (data-transflow-id 포함)');
-      }
-  }, [selectedAreas, onHtmlUpdate, pageLoaded]);
-  
-  // ⭐ Step 2 진입 시 초기화: 모든 선택 상태 제거 (자동 선택 문제 해결)
-  React.useEffect(() => {
-    if (!iframeRef.current || !pageLoaded) return;
+    if (!iframeRef.current || !pageLoaded || initialRestoreDone.current) return;
     
     const iframe = iframeRef.current;
     const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!iframeDoc) return;
     
-    // selectedAreas가 비어있을 때 모든 선택 상태 제거
-    if (selectedAreas.length === 0) {
-      iframeDoc.querySelectorAll('.transflow-selected').forEach(el => {
-        el.classList.remove('transflow-selected');
+    if (selectedAreas.length > 0) {
+      selectedAreas.forEach(area => {
+        const el = iframeDoc.querySelector(`[data-transflow-id="${area.id}"]`) as HTMLElement;
+        if (el) {
+          el.classList.add('transflow-selected');
+        }
       });
-      console.log('🔄 Step 2 초기화: 모든 선택 상태 제거');
     }
-  }, [pageLoaded]); // pageLoaded가 true가 될 때만 실행
+    
+    if (onHtmlUpdate) {
+      const currentHtml = iframeDoc.documentElement.outerHTML;
+      onHtmlUpdate(currentHtml);
+    }
+    
+    initialRestoreDone.current = true;
+  }, [pageLoaded]);
+  
+  // 사용자 인터랙션 후 selectedAreas 변경 시에만 동기화
+  React.useEffect(() => {
+    if (!iframeRef.current || !pageLoaded || !initialRestoreDone.current || !isUserInteraction.current) return;
+    
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) return;
+    
+    if (onHtmlUpdate) {
+      const currentHtml = iframeDoc.documentElement.outerHTML;
+      onHtmlUpdate(currentHtml);
+    }
+    
+    isUserInteraction.current = false;
+  }, [selectedAreas]);
 
   // ⭐ hoveredAreaId가 변경될 때 iframe에서 해당 영역 하이라이트
   React.useEffect(() => {
@@ -166,7 +259,6 @@ const Step2AreaSelection: React.FC<{
   const enableElementSelection = (iframeDoc: Document) => {
     // 이미 리스너가 붙어있으면 중복 방지
     if (listenersAttached.current) {
-      console.log('⚠️ 이미 리스너가 붙어있음, 스킵');
       return;
     }
     // 기존 스타일 제거
@@ -232,7 +324,6 @@ const Step2AreaSelection: React.FC<{
     
     let highlightedElement: HTMLElement | null = null;
     
-    // 선택된 요소 업데이트 함수 (Translation.jsx와 동일)
     const updateSelectedElements = () => {
       const newSelected: any[] = [];
       iframeDoc.querySelectorAll('.transflow-selected').forEach((el) => {
@@ -244,25 +335,24 @@ const Step2AreaSelection: React.FC<{
           });
         }
       });
-      console.log('✅ 선택된 요소 업데이트:', newSelected.length, '개');
-      // 새로 선택된 요소만 onAreaSelect 호출
+      
       newSelected.forEach(item => {
         const existingArea = selectedAreas.find(area => area.id === item.id);
         if (!existingArea) {
-          // 선택자 생성
           const el = iframeDoc.querySelector(`[data-transflow-id="${item.id}"]`) as HTMLElement;
           let selector = '';
-          if (el.id) {
+          if (el && el.id) {
             selector = `#${el.id}`;
-          } else if (el.className) {
+          } else if (el && el.className) {
             const classes = Array.from(el.classList).filter(c => !c.startsWith('transflow-')).join('.');
             if (classes) {
               selector = `${el.tagName.toLowerCase()}.${classes}`;
             }
-          } else {
+          } else if (el) {
             selector = el.tagName.toLowerCase();
           }
           
+          isUserInteraction.current = true;
           onAreaSelect({
             id: item.id,
             selector,
@@ -296,40 +386,30 @@ const Step2AreaSelection: React.FC<{
       }
     };
     
-    // 클릭 시 요소 선택/해제 (토글) - Translation.jsx와 동일
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target || target === iframeDoc.body || target === iframeDoc.documentElement) return;
       if (target.tagName === 'SCRIPT' || target.tagName === 'STYLE' || target.tagName === 'NOSCRIPT') return;
       
-      // ⭐ 링크 클릭 방지 (다른 사이트로 이동 방지)
-      const linkElement = target.closest('a') || (target.tagName === 'A' ? target : null);
-      if (linkElement) {
-        e.preventDefault();
+      e.preventDefault();
       e.stopPropagation();
-        e.stopImmediatePropagation();
-      } else {
-        e.stopPropagation();
-      }
       
-      // 링크인 경우 가장 가까운 링크 요소를 선택 대상으로 사용
+      const linkElement = target.closest('a') || (target.tagName === 'A' ? target : null);
       const elementToSelect = linkElement || target;
       
-      // 요소에 고유 ID 부여
       let elementId = elementToSelect.getAttribute('data-transflow-id');
       if (!elementId) {
         elementId = `transflow-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         elementToSelect.setAttribute('data-transflow-id', elementId);
       }
       
-      // 선택 토글
+      isUserInteraction.current = true;
+      
       if (elementToSelect.classList.contains('transflow-selected')) {
         elementToSelect.classList.remove('transflow-selected');
-        console.log('🔴 선택 해제:', elementId);
         onAreaRemove(elementId);
       } else {
         elementToSelect.classList.add('transflow-selected');
-        console.log('🟢 선택 추가:', elementId, elementToSelect.tagName);
         updateSelectedElements();
       }
       
@@ -364,26 +444,37 @@ const Step2AreaSelection: React.FC<{
         handleClick(e);
       }, true);
       
-      console.log('✅ 이벤트 위임으로 메모리 최적화 완료 (body에만 리스너 추가)');
     }
     
-    // MutationObserver는 제거 (이벤트 위임으로 자동 처리됨)
-    
     listenersAttached.current = true;
-    console.log('✅ 영역 선택 모드 활성화 완료');
   };
 
   useEffect(() => {
-    // 리스너 플래그 초기화
     listenersAttached.current = false;
+    initialRestoreDone.current = false;
+    isUserInteraction.current = false;
+    setPageLoaded(false);
     
     if (iframeRef.current && html) {
       const iframe = iframeRef.current;
       const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
       
       if (iframeDoc) {
-        // HTML 구조 확인 및 보완 (Translation.jsx와 동일)
         let htmlContent = html;
+        
+        // 임시저장에서 불러온 HTML에서 선택 상태 클래스 제거
+        htmlContent = htmlContent.replace(/\s*class="[^"]*transflow-selected[^"]*"/g, (match) => {
+          const cleaned = match.replace(/\btransflow-selected\b\s*/g, '').replace(/\s+/g, ' ').trim();
+          return cleaned === 'class=""' ? '' : cleaned;
+        });
+        htmlContent = htmlContent.replace(/\s*class='[^']*transflow-selected[^']*'/g, (match) => {
+          const cleaned = match.replace(/\btransflow-selected\b\s*/g, '').replace(/\s+/g, ' ').trim();
+          return cleaned === "class=''" ? '' : cleaned;
+        });
+        
+        // 크롤링된 페이지의 스크립트 제거 (변수 중복 선언 오류 방지)
+        htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+        
         const hasDoctype = htmlContent.trim().toLowerCase().startsWith('<!doctype');
         const hasHtml = htmlContent.includes('<html');
         const hasBody = htmlContent.includes('<body');
@@ -437,15 +528,13 @@ const Step2AreaSelection: React.FC<{
         const checkAndEnableSelection = () => {
           try {
             if (iframeDoc.body && iframeDoc.body.children.length > 0) {
-              console.log('✅ 영역 선택 모드 활성화 중...');
               enableElementSelection(iframeDoc);
-              setPageLoaded(true); // 활성화 완료 후 상태 업데이트
+              setPageLoaded(true);
             } else {
               setTimeout(checkAndEnableSelection, 100);
             }
           } catch (error) {
             // iframe 내부 스크립트 에러는 무시
-            console.warn('checkAndEnableSelection error (ignored):', error);
           }
         };
         
@@ -2721,19 +2810,30 @@ const Step6CreateDocument = React.forwardRef<
   {
     draft: TranslationDraft;
     onCreateDocument: (data: { title: string; categoryId?: number; estimatedLength?: number; status: string }) => void;
+    onSaveDraft?: (data: { title: string; categoryId?: number; estimatedLength?: number }) => void;
+    step6Data?: { title?: string; categoryId?: number; estimatedLength?: number };
     isCreating: boolean;
   }
->(({ draft, onCreateDocument, isCreating }, ref) => {
-  const [title, setTitle] = useState('');
-  const [categoryId, setCategoryId] = useState<string>('');
-  const [estimatedLength, setEstimatedLength] = useState<number>(0);
+>(({ draft, onCreateDocument, onSaveDraft, step6Data, isCreating }, ref) => {
+  const [title, setTitle] = useState(step6Data?.title || '');
+  const [categoryId, setCategoryId] = useState<string>(step6Data?.categoryId?.toString() || '');
+  const [estimatedLength, setEstimatedLength] = useState<number>(step6Data?.estimatedLength || 0);
   const [titleError, setTitleError] = useState<string>('');
   const [categories, setCategories] = useState<Array<{ id: number; name: string }>>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
 
+  // step6Data가 있으면 복원 (임시저장에서 불러올 때)
+  useEffect(() => {
+    if (step6Data) {
+      if (step6Data.title) setTitle(step6Data.title);
+      if (step6Data.categoryId) setCategoryId(step6Data.categoryId.toString());
+      if (step6Data.estimatedLength) setEstimatedLength(step6Data.estimatedLength);
+    }
+  }, [step6Data]);
+
   // 문서 제목 자동 파싱 및 번역
   useEffect(() => {
-    if (draft.originalHtml && !title && draft.targetLang) {
+    if (draft.originalHtml && !title && !step6Data?.title && draft.targetLang) {
       const parseAndTranslateTitle = async () => {
         try {
           const parser = new DOMParser();
@@ -3127,12 +3227,22 @@ const Step6CreateDocument = React.forwardRef<
                 return;
               }
               setTitleError('');
-              onCreateDocument({
-                title: title.trim(),
-                categoryId: categoryId ? parseInt(categoryId) : undefined,
-                estimatedLength: estimatedLength > 0 ? estimatedLength : undefined,
-                status: 'DRAFT',
-              });
+              if (onSaveDraft) {
+                // Step 6에서 임시저장 (버전 생성하지 않음)
+                onSaveDraft({
+                  title: title.trim(),
+                  categoryId: categoryId ? parseInt(categoryId) : undefined,
+                  estimatedLength: estimatedLength > 0 ? estimatedLength : undefined,
+                });
+              } else {
+                // 하위 호환성: 기존 방식
+                onCreateDocument({
+                  title: title.trim(),
+                  categoryId: categoryId ? parseInt(categoryId) : undefined,
+                  estimatedLength: estimatedLength > 0 ? estimatedLength : undefined,
+                  status: 'DRAFT',
+                });
+              }
             }}
             disabled={isCreating || !title.trim()}
             style={{ padding: '10px 20px' }}
@@ -5207,21 +5317,18 @@ const NewTranslation: React.FC = () => {
     }
   };
 
-  // 초기 draft 상태 (localStorage에서 복원 또는 기본값)
+  // 초기 draft 상태 (항상 빈 상태로 시작 - 새 번역은 항상 새로운 작업)
   const [draft, setDraft] = useState<TranslationDraft>(() => {
-    const saved = loadDraftFromStorage();
-    if (saved) {
-      return saved;
-    }
     return {
-    url: '',
-    selectedAreas: [],
-    originalHtml: '',
-    originalHtmlWithIds: '', // STEP 2의 iframe HTML (data-transflow-id 포함)
-    state: DocumentState.DRAFT,
+      url: '',
+      selectedAreas: [],
+      originalHtml: '',
+      originalHtmlWithIds: '', // STEP 2의 iframe HTML (data-transflow-id 포함)
+      state: DocumentState.DRAFT,
     };
   });
   const [documentId, setDocumentId] = useState<number | null>(null);
+  const [step6Data, setStep6Data] = useState<{ title?: string; categoryId?: number; estimatedLength?: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [isTranslating, setIsTranslating] = useState(false);
@@ -5230,6 +5337,7 @@ const NewTranslation: React.FC = () => {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [draftDocuments, setDraftDocuments] = useState<DocumentResponse[]>([]);
   const step6Ref = React.useRef<{ handleDraftSave: () => void; handlePublish: () => void } | null>(null);
   // Step 5용 패널 접기/펼치기 상태
   const [step5CollapsedPanels, setStep5CollapsedPanels] = useState<Set<string>>(new Set());
@@ -5244,6 +5352,44 @@ const NewTranslation: React.FC = () => {
   }, [userRole]);
 
   // 사이드바 자동 접기 제거 (사용자가 직접 제어)
+
+  // ⭐ 새 번역 시작 시 localStorage draft 초기화 (다른 기기/브라우저에서 예전 데이터가 남아있는 문제 해결)
+  useEffect(() => {
+    // 컴포넌트 마운트 시 localStorage의 draft 초기화
+    // "새 번역 만들기"는 항상 새로운 작업을 시작하는 것이므로
+    try {
+      localStorage.removeItem('transflow-draft');
+      console.log('🗑️ 새 번역 시작: localStorage draft 초기화 완료');
+    } catch (e) {
+      console.warn('⚠️ localStorage 초기화 실패:', e);
+    }
+  }, []); // 컴포넌트 마운트 시 한 번만 실행
+
+  // 임시저장 문서 로드
+  useEffect(() => {
+    const loadDraftDocuments = async () => {
+      try {
+        const allDocs = await documentApi.getAllDocuments();
+        console.log('📋 [NewTranslation] 전체 문서 조회:', allDocs.length, '개');
+        console.log('📋 [NewTranslation] 문서 샘플:', allDocs.slice(0, 3).map(doc => ({
+          id: doc.id,
+          title: doc.title,
+          status: doc.status,
+          hasVersions: doc.hasVersions,
+          versionCount: doc.versionCount
+        })));
+        const draftOnlyDocs = allDocs.filter(doc => 
+          doc.status === 'DRAFT' && doc.hasVersions !== true
+        );
+        console.log('📋 [NewTranslation] 임시저장 문서 필터링 결과:', draftOnlyDocs.length, '개');
+        setDraftDocuments(draftOnlyDocs);
+        console.log('📋 임시저장 문서 로드 완료:', draftOnlyDocs.length, '개');
+      } catch (error) {
+        console.error('임시저장 문서 로드 실패:', error);
+      }
+    };
+    loadDraftDocuments();
+  }, []);
 
   // 권한 체크
   useEffect(() => {
@@ -5373,6 +5519,8 @@ const NewTranslation: React.FC = () => {
         setDraft((prev) => ({
           ...prev,
           originalHtml: htmlContent,
+          selectedAreas: [], // ⭐ 새로 크롤링하면 선택 영역 초기화
+          originalHtmlWithIds: '', // ⭐ 이전 HTML with IDs도 초기화
         }));
         setCurrentStep(2);
       } else {
@@ -5503,9 +5651,9 @@ const NewTranslation: React.FC = () => {
         }
       }
       
-      // 다음으로 넘어갈 때는 자동 저장 (STEP 3 포함)
+      // 다음으로 넘어갈 때는 자동 저장 (STEP 3 포함) - 모달 표시 안 함
       if (hasUnsavedChanges) {
-        await handleSaveDraft();
+        await handleSaveDraft(undefined, true); // isAutoSave = true
       }
       setCurrentStep(currentStep + 1);
     }
@@ -5518,6 +5666,17 @@ const NewTranslation: React.FC = () => {
           return;
         }
       }
+      
+      // Step 3에서 Step 2로 돌아갈 때 선택 영역 초기화
+      if (currentStep === 3) {
+        setDraft(prev => ({
+          ...prev,
+          selectedAreas: [],
+          originalHtmlWithIds: '',
+          editedHtml: '',
+        }));
+      }
+      
       setCurrentStep(currentStep - 1);
     }
   };
@@ -5529,7 +5688,7 @@ const NewTranslation: React.FC = () => {
     setSaveError(null);
 
     try {
-      // 1. 문서 생성
+      // 1. 문서 생성 (또는 기존 문서 업데이트)
       const response = await documentApi.createDocument({
         title: data.title,
         originalUrl: draft.url,
@@ -5540,9 +5699,18 @@ const NewTranslation: React.FC = () => {
         status: data.status,
       });
       setDocumentId(response.id);
-      console.log('✅ 문서 생성 완료:', response.id);
+      console.log('✅ 문서 생성/업데이트 완료:', response.id);
 
-      // 2. 원문 버전 생성 (선택한 영역)
+      // 2. 기존 버전 삭제 (Step 6에서 새로 생성하기 전에 기존 버전 정리)
+      try {
+        await documentApi.deleteAllVersions(response.id);
+        console.log('🗑️ 기존 버전 삭제 완료');
+      } catch (error: any) {
+        console.warn('⚠️ 기존 버전 삭제 실패 (무시):', error);
+        // 버전이 없을 수도 있으므로 에러는 무시
+      }
+
+      // 3. 원문 버전 생성 (선택한 영역)
       await documentApi.createDocumentVersion(response.id, {
         versionType: 'ORIGINAL',
         content: draft.editedHtml || draft.originalHtmlWithIds || draft.originalHtml,
@@ -5550,7 +5718,7 @@ const NewTranslation: React.FC = () => {
       });
       console.log('✅ 원문 버전 저장 완료');
 
-      // 3. AI 번역 버전 생성
+      // 4. AI 번역 버전 생성
       if (draft.translatedHtml) {
         await documentApi.createDocumentVersion(response.id, {
           versionType: 'AI_DRAFT',
@@ -5581,56 +5749,155 @@ const NewTranslation: React.FC = () => {
     }
   };
 
-  const handleSaveDraft = async () => {
-    if (!documentId) {
-      // 문서가 없으면 먼저 생성
-      try {
+  // 임시저장 문서 불러오기
+  const handleLoadDraft = async (doc: DocumentResponse) => {
+    try {
+      console.log('🔄 임시저장 문서 불러오기 시작:', doc.id);
+      console.log('📦 draftData:', doc.draftData ? `존재 (${doc.draftData.length}자)` : '없음');
+      console.log('📦 draftData 내용:', doc.draftData);
+      
+      // draftData가 있고 빈 문자열이 아닌 경우에만 파싱
+      if (doc.draftData && doc.draftData.trim() !== '') {
+        try {
+          // 저장된 draftData가 있으면 파싱해서 복원
+          const parsedData = JSON.parse(doc.draftData);
+          console.log('✅ JSON 파싱 성공:', parsedData);
+          
+          let savedStep = parsedData.currentStep || 1;
+          const savedDraft = parsedData.draft || {};
+          const savedStep6Data = parsedData.step6Data || null;
+
+          // Step 2, 4에서 저장된 경우 Step 3으로 이동
+          // - Step 2: 임시저장 불가 (선택만 하는 단계)
+          // - Step 4: 단순 번역 확인 단계, 편집 내용은 Step 3에서 복원
+          if (savedStep === 2 || savedStep === 4) {
+            savedStep = 3;
+          }
+
+          setDraft({
+            url: savedDraft.url || doc.originalUrl,
+            selectedAreas: savedDraft.selectedAreas || [],
+            originalHtml: savedDraft.originalHtml || '',
+            originalHtmlWithIds: savedDraft.originalHtmlWithIds || '',
+            editedHtml: savedDraft.editedHtml,
+            translatedHtml: savedDraft.translatedHtml,
+            sourceLang: savedDraft.sourceLang || doc.sourceLang || 'auto',
+            targetLang: savedDraft.targetLang || doc.targetLang || 'ko',
+            state: savedDraft.state || DocumentState.DRAFT,
+          });
+          setDocumentId(doc.id);
+          setCurrentStep(savedStep);
+          
+          // Step 6 데이터 저장 (Step 6 컴포넌트에서 사용)
+          if (savedStep === 6 && savedStep6Data) {
+            setStep6Data(savedStep6Data);
+          } else {
+            setStep6Data(null);
+          }
+          
+          console.log('✅ 임시저장 문서 불러오기 완료:', doc.id, 'Step', savedStep);
+          alert('임시저장 문서를 불러왔습니다.');
+        } catch (parseError) {
+          console.error('❌ JSON 파싱 실패:', parseError);
+          console.error('❌ 손상된 draftData:', doc.draftData);
+          throw new Error(`JSON 파싱 실패: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+        }
+      } else {
+        // draftData가 없거나 빈 문자열이면 기본값으로 복원 (하위 호환성)
+        console.log('⚠️ draftData가 없거나 비어있어 기본값으로 복원');
+        setDraft({
+          url: doc.originalUrl,
+          sourceLang: doc.sourceLang || 'auto',
+          targetLang: doc.targetLang || 'ko',
+          selectedAreas: [],
+          originalHtml: '',
+          originalHtmlWithIds: '',
+          state: DocumentState.DRAFT,
+        });
+        setDocumentId(doc.id);
+        setCurrentStep(1);
+        console.log('✅ 임시저장 문서 불러오기 완료 (기본값):', doc.id);
+        alert('임시저장 문서를 불러왔습니다. (기본값으로 복원)');
+      }
+    } catch (error) {
+      console.error('❌ 임시저장 문서 불러오기 실패:', error);
+      console.error('❌ 오류 상세:', error instanceof Error ? error.message : String(error));
+      alert(`임시저장 문서를 불러오는데 실패했습니다.\n오류: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleSaveDraft = async (step6Data?: { title?: string; categoryId?: number; estimatedLength?: number }, isAutoSave: boolean = false) => {
+    try {
+      // draft 상태와 currentStep을 JSON으로 저장
+      const draftData = JSON.stringify({
+        currentStep,
+        draft: {
+          url: draft.url,
+          selectedAreas: draft.selectedAreas,
+          originalHtml: draft.originalHtml,
+          originalHtmlWithIds: draft.originalHtmlWithIds,
+          editedHtml: draft.editedHtml,
+          translatedHtml: draft.translatedHtml,
+          sourceLang: draft.sourceLang,
+          targetLang: draft.targetLang,
+          state: draft.state,
+        },
+        // Step 6의 입력값들도 저장
+        step6Data: step6Data || null,
+      });
+
+      // Step 6에서 임시저장할 때는 제목도 업데이트
+      const documentTitle = step6Data?.title || `번역 문서 - ${new Date().toLocaleString()}`;
+
+      if (!documentId) {
+        // 문서가 없으면 먼저 생성 (버전은 생성하지 않음 - Step 6에서만 생성)
         const response = await documentApi.createDocument({
-          title: `번역 문서 - ${new Date().toLocaleString()}`,
+          title: documentTitle,
           originalUrl: draft.url,
-          sourceLang: 'EN', // TODO: 실제 언어 감지
-          targetLang: 'KO',
+          sourceLang: draft.sourceLang || 'auto',
+          targetLang: draft.targetLang || 'ko',
+          status: 'DRAFT',
+          categoryId: step6Data?.categoryId,
+          estimatedLength: step6Data?.estimatedLength,
+          draftData: draftData,
         });
         setDocumentId(response.id);
-        
-        // 원문 버전 생성
-        await documentApi.createDocumentVersion(response.id, {
-          versionType: 'ORIGINAL',
-          content: draft.originalHtml,
-          isFinal: false,
-        });
+        console.log('✅ 임시저장 완료 (문서 생성):', response.id, 'Step', currentStep);
+      } else {
+        // 문서가 있으면 문서만 업데이트 (버전은 생성하지 않음)
+        const updateData: any = {
+          draftData: draftData, // 항상 draftData는 업데이트
+        };
+        // Step 6 데이터가 있으면 추가
+        if (step6Data) {
+          if (step6Data.title) updateData.title = step6Data.title;
+          if (step6Data.categoryId) updateData.categoryId = step6Data.categoryId;
+          if (step6Data.estimatedLength) updateData.estimatedLength = step6Data.estimatedLength;
+        }
+        await documentApi.updateDocument(documentId, updateData);
+        console.log('✅ 임시저장 완료 (문서 업데이트):', documentId, 'Step', currentStep);
+      }
 
-        setLastSaved(new Date());
-        setHasUnsavedChanges(false);
-        setSaveError(null);
-      } catch (error: any) {
-        console.error('Save error:', error);
-        setSaveError(error?.response?.data?.message || '저장 실패');
+      setLastSaved(new Date());
+      setHasUnsavedChanges(false);
+      setSaveError(null);
+
+      // ⭐ 임시저장 문서 목록 다시 로드
+      const allDocs = await documentApi.getAllDocuments();
+      const draftOnlyDocs = allDocs.filter(doc => 
+        doc.status === 'DRAFT' && doc.hasVersions !== true
+      );
+      setDraftDocuments(draftOnlyDocs);
+      console.log('✅ 임시저장 목록 갱신 완료:', draftOnlyDocs.length, '개');
+      
+      // ⭐ 임시저장 완료 모달 표시 (자동 저장이 아닐 때만)
+      if (!isAutoSave) {
+        alert('임시저장되었습니다.');
       }
-    } else {
-      // 문서가 있으면 버전 업데이트
-      try {
-        if (draft.editedHtml && draft.editedHtml !== draft.originalHtml) {
-          await documentApi.createDocumentVersion(documentId, {
-            versionType: 'MANUAL_TRANSLATION',
-            content: draft.editedHtml,
-            isFinal: false,
-          });
-        }
-        if (draft.translatedHtml) {
-          await documentApi.createDocumentVersion(documentId, {
-            versionType: 'AI_DRAFT',
-            content: draft.translatedHtml,
-            isFinal: false,
-          });
-        }
-        setLastSaved(new Date());
-        setHasUnsavedChanges(false);
-        setSaveError(null);
-      } catch (error: any) {
-        console.error('Save error:', error);
-        setSaveError(error?.response?.data?.message || '저장 실패');
-      }
+    } catch (error: any) {
+      console.error('Save error:', error);
+      setSaveError(error?.response?.data?.message || '저장 실패');
+      alert(`임시저장에 실패했습니다.\n오류: ${error?.response?.data?.message || error.message || '저장 실패'}`);
     }
   };
 
@@ -5648,12 +5915,14 @@ const NewTranslation: React.FC = () => {
             onExecute={handleCrawling}
             isLoading={isLoading}
             loadingProgress={loadingProgress}
+            draftDocuments={draftDocuments}
+            onLoadDraft={handleLoadDraft}
           />
         );
       case 2:
         return (
           <Step2AreaSelection
-            html={draft.originalHtml}
+            html={draft.originalHtmlWithIds || draft.originalHtml}
             selectedAreas={draft.selectedAreas}
             onAreaSelect={handleAreaSelect}
             onAreaRemove={handleAreaRemove}
@@ -5673,7 +5942,7 @@ const NewTranslation: React.FC = () => {
         });
         return (
           <Step3PreEdit
-            html={draft.originalHtmlWithIds || draft.editedHtml || draft.originalHtml}
+            html={draft.editedHtml || draft.originalHtmlWithIds || draft.originalHtml}
             onHtmlChange={(html) => setDraft((prev) => ({ ...prev, editedHtml: html }))}
             selectedAreas={draft.selectedAreas}
           />
@@ -5717,6 +5986,11 @@ const NewTranslation: React.FC = () => {
               // Step6CreateDocument에서 status를 포함하여 전달
               handleCreateDocument(data);
             }}
+            onSaveDraft={(data) => {
+              // Step 6에서 임시저장
+              handleSaveDraft(data);
+            }}
+            step6Data={step6Data || undefined}
             isCreating={isCreating}
           />
         );
@@ -5780,7 +6054,7 @@ const NewTranslation: React.FC = () => {
                 fontFamily: 'system-ui, Pretendard, sans-serif',
               }}
             >
-              {lastSaved ? `마지막 저장: ${lastSaved.toLocaleTimeString()}` : '저장되지 않음'}
+              {currentStep >= 3 && lastSaved ? `마지막 저장: ${lastSaved.toLocaleTimeString()}` : currentStep >= 3 ? '저장되지 않음' : ''}
             </div>
             {saveError && (
               <div
@@ -5903,11 +6177,13 @@ const NewTranslation: React.FC = () => {
           </div>
         )}
 
-        {/* 오른쪽: 임시 저장 버튼 */}
+        {/* 오른쪽: 임시 저장 버튼 (Step 3부터만 표시) */}
         <div>
-          <Button variant="secondary" onClick={handleSaveDraft} style={{ fontSize: '12px', padding: '4px 8px' }}>
-            임시 저장
-          </Button>
+          {currentStep >= 3 && (
+            <Button variant="secondary" onClick={() => handleSaveDraft()} style={{ fontSize: '12px', padding: '4px 8px' }}>
+              임시 저장
+            </Button>
+          )}
         </div>
       </div>
 
