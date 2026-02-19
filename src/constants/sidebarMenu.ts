@@ -67,12 +67,9 @@ export const sidebarMenu: MenuItem[] = [
   {
     key: 'glossary',
     label: '용어집',
+    path: '/glossary',
     roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.VOLUNTEER],
     icon: 'BookOpen',
-    children: [
-      { label: '용어집 보기', path: '/glossary' },
-      { label: '용어집 관리', path: '/glossary/manage', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
-    ],
   },
   {
     key: 'activity',

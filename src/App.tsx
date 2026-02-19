@@ -21,7 +21,6 @@ import DocumentReview from './pages/DocumentReview';
 import TranslationsFavorites from './pages/TranslationsFavorites';
 import SystemSettings from './pages/SystemSettings';
 import Glossary from './pages/Glossary';
-import GlossaryManage from './pages/GlossaryManage';
 import UserManagement from './pages/UserManagement';
 const Activity = () => <div className="p-8"><h1 className="text-2xl font-bold">내 활동</h1></div>;
 
@@ -116,11 +115,6 @@ function App() {
                         <Route path="/glossary" element={
                           <ErrorBoundary>
                             <Glossary />
-                          </ErrorBoundary>
-                        } />
-                        <Route path="/glossary/manage" element={
-                          <ErrorBoundary>
-                            <GlossaryManage />
                           </ErrorBoundary>
                         } />
                         <Route path="/users" element={

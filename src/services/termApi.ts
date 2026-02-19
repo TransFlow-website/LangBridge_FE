@@ -160,5 +160,27 @@ export const termApi = {
     const response = await apiClient.delete<{ success: boolean; message: string }>(`/terms/${id}`);
     return response.data;
   },
+
+  /**
+   * 용어집 전체 내보내기 (TSV 형식)
+   */
+  exportTerms: async (params?: {
+    sourceLang?: string;
+    targetLang?: string;
+  }): Promise<Blob> => {
+    const queryParams = new URLSearchParams();
+    if (params?.sourceLang) {
+      queryParams.append('sourceLang', params.sourceLang);
+    }
+    if (params?.targetLang) {
+      queryParams.append('targetLang', params.targetLang);
+    }
+    const queryString = queryParams.toString();
+    const url = `/terms/export${queryString ? `?${queryString}` : ''}`;
+    const response = await apiClient.get(url, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
 };
 
