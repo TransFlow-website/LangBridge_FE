@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Table, TableColumn } from '../components/Table';
-import { ProgressBar } from '../components/ProgressBar';
 import { DocumentListItem, Priority, DocumentFilter, DocumentSortOption } from '../types/document';
 import { DocumentState } from '../types/translation';
 import { colors } from '../constants/designTokens';
@@ -9,8 +8,17 @@ import { Button } from '../components/Button';
 import { documentApi, DocumentResponse, DocumentVersionResponse } from '../services/documentApi';
 import { categoryApi, CategoryResponse } from '../services/categoryApi';
 import { LockStatusResponse } from '../services/translationWorkApi';
+import { formatLastModifiedDate } from '../utils/dateUtils';
 
-const priorities = ['전체', '높음', '보통', '낮음'];
+/** 번역 대기 문서 목록에만 나오는 상태 (임시저장/초안 제외) */
+const PENDING_PAGE_STATUSES = [
+  { value: '전체', label: '전체' },
+  { value: 'PENDING_TRANSLATION', label: '번역 대기' },
+  { value: 'IN_TRANSLATION', label: '번역 중' },
+  { value: 'PENDING_REVIEW', label: '검토 대기' },
+  { value: 'APPROVED', label: '번역 완료' },
+  { value: 'PUBLISHED', label: '공개됨' },
+];
 
 /**
  * HTML에서 문단 수를 계산하는 함수
@@ -136,29 +144,11 @@ const convertToDocumentListItem = (
     deadline,
     priority,
     status: doc.status as DocumentState,
-    lastModified: doc.updatedAt ? formatRelativeTime(doc.updatedAt) : undefined,
+    lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
     assignedManager: doc.lastModifiedBy?.name,
     isFinal: false, // 나중에 버전 정보에서 가져오기
     originalUrl: doc.originalUrl,
   };
-};
-
-// 상대 시간 포맷팅 (예: "2시간 전")
-const formatRelativeTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 60) {
-    return `${diffMins}분 전`;
-  } else if (diffHours < 24) {
-    return `${diffHours}시간 전`;
-  } else {
-    return `${diffDays}일 전`;
-  }
 };
 
 export default function TranslationsPending() {
@@ -167,10 +157,10 @@ export default function TranslationsPending() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('전체');
-  const [selectedPriority, setSelectedPriority] = useState<string>('전체');
+  const [selectedStatus, setSelectedStatus] = useState<string>('전체');
   const [sortOption, setSortOption] = useState<DocumentSortOption>({
-    field: 'deadline',
-    order: 'asc',
+    field: 'lastModified',
+    order: 'desc',
   });
   const [categoryMap, setCategoryMap] = useState<Map<number, string>>(new Map());
   const [categories, setCategories] = useState<string[]>(['전체']);
@@ -239,17 +229,18 @@ export default function TranslationsPending() {
           기타: response.filter((d) => !['PENDING_TRANSLATION', 'IN_TRANSLATION'].includes(d.status)).length,
         });
         
-        // PENDING_TRANSLATION, IN_TRANSLATION, APPROVED 상태 모두 포함
+        // 번역 관련 상태 문서 모두 포함 (DRAFT 제외)
         const pendingDocs = response.filter(
-          (doc) => doc.status === 'PENDING_TRANSLATION' || doc.status === 'IN_TRANSLATION' || doc.status === 'APPROVED'
+          (doc) => ['PENDING_TRANSLATION', 'IN_TRANSLATION', 'PENDING_REVIEW', 'APPROVED', 'PUBLISHED'].includes(doc.status)
         );
-        console.log('📌 번역 대기/진행 중/완료 문서:', pendingDocs.length, '개');
+        console.log('📌 번역 관련 문서:', pendingDocs.length, '개');
         
         // 각 문서에 락 정보 및 ORIGINAL 버전 추가
         const docsWithLockInfo = await Promise.all(
           pendingDocs.map(async (doc) => {
             let lockInfo = null;
             let originalVersion = null;
+            let currentVersionNumber: number | null = null;
 
             // IN_TRANSLATION 상태인 경우 락 정보 가져오기
             if (doc.status === 'IN_TRANSLATION') {
@@ -270,6 +261,10 @@ export default function TranslationsPending() {
             try {
               const versions = await documentApi.getDocumentVersions(doc.id);
               originalVersion = versions.find(v => v.versionType === 'ORIGINAL') || null;
+              if (doc.currentVersionId) {
+                const currentVer = versions.find(v => v.id === doc.currentVersionId);
+                currentVersionNumber = currentVer?.versionNumber ?? null;
+              }
               if (originalVersion) {
                 console.log(`📄 문서 ${doc.id} ORIGINAL 버전:`, {
                   versionId: originalVersion.id,
@@ -287,6 +282,7 @@ export default function TranslationsPending() {
               ...doc,
               lockInfo,
               originalVersion,
+              currentVersionNumber,
             };
           })
         );
@@ -299,6 +295,9 @@ export default function TranslationsPending() {
           }
           if (doc.currentVersionId) {
             item.currentVersionId = doc.currentVersionId;
+          }
+          if (doc.currentVersionNumber) {
+            item.currentVersionNumber = doc.currentVersionNumber;
           }
           return item;
         });
@@ -334,40 +333,34 @@ export default function TranslationsPending() {
       filtered = filtered.filter((doc) => doc.category === selectedCategory);
     }
 
-    // 우선순위 필터
-    if (selectedPriority !== '전체') {
-      const priorityMap: Record<string, Priority> = {
-        높음: Priority.HIGH,
-        보통: Priority.MEDIUM,
-        낮음: Priority.LOW,
-      };
-      filtered = filtered.filter((doc) => doc.priority === priorityMap[selectedPriority]);
+    // 상태 필터 (번역 대기 문서에 나오는 상태만)
+    if (selectedStatus !== '전체') {
+      filtered = filtered.filter((doc) => doc.status === selectedStatus);
     }
 
-    // 정렬
+    // 정렬 (최근 수정순 등, 마감일 제외)
     filtered.sort((a, b) => {
-      if (sortOption.field === 'deadline') {
-        // 마감일 임박순 (간단히 숫자로 변환)
-        const aDays = parseInt(a.deadline?.replace('일 후', '') || '999');
-        const bDays = parseInt(b.deadline?.replace('일 후', '') || '999');
-        return sortOption.order === 'asc' ? aDays - bDays : bDays - aDays;
-      } else if (sortOption.field === 'progress') {
-        return sortOption.order === 'asc' ? a.progress - b.progress : b.progress - a.progress;
+      if (sortOption.field === 'lastModified') {
+        const aTime = a.lastModified || '';
+        const bTime = b.lastModified || '';
+        return sortOption.order === 'asc' ? aTime.localeCompare(bTime) : bTime.localeCompare(aTime);
+      } else if (sortOption.field === 'title') {
+        return sortOption.order === 'asc'
+          ? a.title.localeCompare(b.title)
+          : b.title.localeCompare(a.title);
       }
       return 0;
     });
 
     return filtered;
-  }, [documents, selectedCategory, selectedPriority, sortOption]);
+  }, [documents, selectedCategory, selectedStatus, sortOption]);
 
   const handleStartTranslation = (doc: DocumentListItem) => {
-    // IN_TRANSLATION 상태이고 현재 작업자가 아닌 경우 경고
-    if (doc.status === 'IN_TRANSLATION' && doc.currentWorker) {
-      alert(`이 문서는 현재 ${doc.currentWorker}님이 작업 중입니다.`);
-      return;
-    }
-    // 번역 작업 화면으로 이동
-    navigate(`/translations/${doc.id}/work`);
+    navigate(`/translations/${doc.id}/work`, { state: { from: '/translations/pending' } });
+  };
+
+  const handleViewDetail = (doc: DocumentListItem) => {
+    navigate(`/documents/${doc.id}?from=pending`);
   };
 
   const handleToggleFavorite = async (doc: DocumentListItem, e: React.MouseEvent) => {
@@ -506,51 +499,53 @@ export default function TranslationsPending() {
       align: 'right',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
-          {item.currentVersionId ? `v${item.currentVersionId}` : '-'}
+          {item.currentVersionNumber ? `v${item.currentVersionNumber}` : '-'}
         </span>
       ),
     },
     {
-      key: 'progress',
-      label: '작업 진행률',
-      width: '12%',
-      render: (item) => <ProgressBar progress={item.progress} />,
+      key: 'estimatedLength',
+      label: '예상 분량',
+      width: '10%',
+      align: 'right',
+      render: (item) => (
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+          {item.estimatedLength ? `${item.estimatedLength.toLocaleString()}자` : '-'}
+        </span>
+      ),
     },
     {
       key: 'action',
       label: '액션',
-      width: '17%',
+      width: '20%',
       align: 'right',
       render: (item) => {
-        const isInTranslation = item.status === 'IN_TRANSLATION';
-        const isApproved = item.status === 'APPROVED';
-        const isDisabled = isInTranslation || isApproved;
-        
+        const isPending = item.status === 'PENDING_TRANSLATION';
+
         return (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'flex-end' }}>
             <Button
-              variant={isDisabled ? 'disabled' : (item.progress === 0 ? 'primary' : 'secondary')}
+              variant="secondary"
               onClick={(e) => {
-                if (e) {
-                  e.stopPropagation();
-                }
-                if (!isDisabled) {
-                  handleStartTranslation(item);
-                }
+                if (e) e.stopPropagation();
+                handleViewDetail(item);
               }}
-              style={{ 
-                fontSize: '12px', 
-                padding: '6px 12px',
-                ...(isApproved ? {
-                  background: '#28A745',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  cursor: 'default',
-                } : {})
-              }}
+              style={{ fontSize: '12px', padding: '6px 12px' }}
             >
-              {isApproved ? '완료' : (item.progress === 0 ? '번역 시작' : '이어하기')}
+              상세보기
             </Button>
+            {isPending && (
+              <Button
+                variant="primary"
+                onClick={(e) => {
+                  if (e) e.stopPropagation();
+                  handleStartTranslation(item);
+                }}
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+              >
+                번역 시작
+              </Button>
+            )}
           </div>
         );
       },
@@ -589,7 +584,7 @@ export default function TranslationsPending() {
           backgroundColor: '#F8F9FA',
           borderRadius: '4px',
         }}>
-          번역 대기 및 번역 중인 문서를 확인할 수 있습니다. 번역 중인 문서는 다른 봉사자가 작업 중이므로 접근할 수 없습니다.
+          번역 대기, 번역 중, 완료된 문서를 모두 확인할 수 있습니다. 번역 대기 문서만 번역을 시작할 수 있으며, 상세보기로 문서 내용을 확인할 수 있습니다.
         </div>
 
         {/* 필터/정렬 바 */}
@@ -630,10 +625,10 @@ export default function TranslationsPending() {
           </div>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <label style={{ fontSize: '13px', color: colors.primaryText }}>우선순위:</label>
+            <label style={{ fontSize: '13px', color: colors.primaryText }}>상태:</label>
             <select
-              value={selectedPriority}
-              onChange={(e) => setSelectedPriority(e.target.value)}
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
               style={{
                 padding: '6px 12px',
                 border: `1px solid ${colors.border}`,
@@ -644,9 +639,9 @@ export default function TranslationsPending() {
                 cursor: 'pointer',
               }}
             >
-              {priorities.map((pri) => (
-                <option key={pri} value={pri}>
-                  {pri}
+              {PENDING_PAGE_STATUSES.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -670,9 +665,9 @@ export default function TranslationsPending() {
                 cursor: 'pointer',
               }}
             >
-              <option value="deadline-asc">마감일 임박순</option>
-              <option value="progress-asc">진행률 낮은 순</option>
-              <option value="progress-desc">진행률 높은 순</option>
+              <option value="lastModified-desc">최근 수정순</option>
+              <option value="lastModified-asc">오래된 수정순</option>
+              <option value="title-asc">제목 가나다순</option>
             </select>
           </div>
         </div>

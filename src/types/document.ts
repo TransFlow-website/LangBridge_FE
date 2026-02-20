@@ -21,7 +21,9 @@ export interface DocumentListItem {
   isFinal: boolean; // Final 여부
   originalUrl?: string;
   currentWorker?: string; // 현재 작업자 (IN_TRANSLATION 상태인 경우)
+  isMyLock?: boolean; // IN_TRANSLATION일 때 현재 사용자가 락을 보유 중인지
   currentVersionId?: number; // 현재 버전 ID
+  currentVersionNumber?: number; // 현재 버전 번호 (1, 2, 3...)
   hasVersions?: boolean; // 버전 존재 여부
 }
 

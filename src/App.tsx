@@ -22,6 +22,7 @@ import TranslationsFavorites from './pages/TranslationsFavorites';
 import SystemSettings from './pages/SystemSettings';
 import Glossary from './pages/Glossary';
 import UserManagement from './pages/UserManagement';
+import TranslationsHandover from './pages/TranslationsHandover';
 const Activity = () => <div className="p-8"><h1 className="text-2xl font-bold">내 활동</h1></div>;
 
 function App() {
@@ -90,6 +91,11 @@ function App() {
                         <Route path="/documents" element={
                           <ErrorBoundary>
                             <Documents />
+                          </ErrorBoundary>
+                        } />
+                        <Route path="/documents/handovers" element={
+                          <ErrorBoundary>
+                            <TranslationsHandover />
                           </ErrorBoundary>
                         } />
                         <Route path="/documents/:id" element={

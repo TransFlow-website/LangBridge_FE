@@ -9,24 +9,8 @@ import { Document, DashboardData } from '../types/dashboard';
 import { documentApi, DocumentResponse } from '../services/documentApi';
 import { reviewApi, ReviewResponse } from '../services/reviewApi';
 import { categoryApi, CategoryResponse } from '../services/categoryApi';
-
-// 상대 시간 포맷팅
-const formatRelativeTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 60) {
-    return `${diffMins}분 전`;
-  } else if (diffHours < 24) {
-    return `${diffHours}시간 전`;
-  } else {
-    return `${diffDays}일 전`;
-  }
-};
+import { translationWorkApi } from '../services/translationWorkApi';
+import { formatLastModifiedDate } from '../utils/dateUtils';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -110,15 +94,32 @@ const Dashboard: React.FC = () => {
           progress: 0,
         }));
 
-        // 2. 작업 중인 문서 (IN_TRANSLATION 상태)
-        const workingDocs = await documentApi.getAllDocuments({ status: 'IN_TRANSLATION' });
-        const workingDocuments: Document[] = workingDocs.slice(0, 3).map(doc => ({
+        // 2. 내가 작업 중인 문서 (IN_TRANSLATION이면서 현재 사용자가 락을 보유한 문서만)
+        const inTranslationDocs = await documentApi.getAllDocuments({ status: 'IN_TRANSLATION' });
+        const myWorkingDocs: DocumentResponse[] = [];
+        if (user?.id) {
+          for (const doc of inTranslationDocs) {
+            try {
+              const lockStatus = await translationWorkApi.getLockStatus(doc.id);
+              if (!lockStatus) continue;
+              const lockedById = lockStatus.lockedBy?.id;
+              const myId = user.id;
+              const isMyLock = lockStatus.locked && lockStatus.canEdit &&
+                lockedById !== undefined && myId !== undefined &&
+                Number(lockedById) === Number(myId);
+              if (isMyLock) myWorkingDocs.push(doc);
+            } catch {
+              // 락 조회 실패 시 해당 문서 제외
+            }
+          }
+        }
+        const workingDocuments: Document[] = myWorkingDocs.slice(0, 3).map(doc => ({
           id: doc.id,
           title: doc.title,
           category: doc.categoryId && categoryMap.has(doc.categoryId)
             ? categoryMap.get(doc.categoryId)!
             : (doc.categoryId ? `카테고리 ${doc.categoryId}` : '미분류'),
-          lastModified: doc.updatedAt ? formatRelativeTime(doc.updatedAt) : undefined,
+          lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
         }));
 
         // 3. 검토 대기 문서 (관리자만)
@@ -194,8 +195,8 @@ const Dashboard: React.FC = () => {
                     ? categoryMap.get(doc.categoryId)!
                     : (doc.categoryId ? `카테고리 ${doc.categoryId}` : '미분류'),
                   lastModified: review?.finalApprovalAt 
-                    ? formatRelativeTime(review.finalApprovalAt)
-                    : (doc.updatedAt ? formatRelativeTime(doc.updatedAt) : undefined),
+                    ? formatLastModifiedDate(review.finalApprovalAt)
+                    : (doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined),
                 };
               });
             
@@ -230,7 +231,7 @@ const Dashboard: React.FC = () => {
                 category: doc.categoryId && categoryMap.has(doc.categoryId)
                   ? categoryMap.get(doc.categoryId)!
                   : (doc.categoryId ? `카테고리 ${doc.categoryId}` : '미분류'),
-                lastModified: review?.reviewedAt ? formatRelativeTime(review.reviewedAt) : undefined,
+                lastModified: review?.reviewedAt ? formatLastModifiedDate(review.reviewedAt) : undefined,
               };
             });
         }
@@ -258,7 +259,7 @@ const Dashboard: React.FC = () => {
       // 관리자인데 카테고리 맵이 아직 로드되지 않은 경우, 일단 데이터 로드 (카테고리 ID로 표시)
       loadDashboardData();
     }
-  }, [isAdmin, categoryMap]);
+  }, [isAdmin, categoryMap, user?.id]);
 
   // 찜 상태 로드
   useEffect(() => {

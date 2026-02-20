@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Table, TableColumn } from '../components/Table';
-import { ProgressBar } from '../components/ProgressBar';
 import { StatusBadge } from '../components/StatusBadge';
 import { DocumentListItem, Priority, DocumentFilter, DocumentSortOption } from '../types/document';
 import { DocumentState } from '../types/translation';
@@ -12,6 +11,7 @@ import { useUser } from '../contexts/UserContext';
 import { UserRole } from '../types/user';
 import { Modal } from '../components/Modal';
 import { translationWorkApi } from '../services/translationWorkApi';
+import { formatLastModifiedDate, formatLastModifiedDateDisplay } from '../utils/dateUtils';
 
 const categories = ['전체', '웹사이트', '마케팅', '고객지원', '기술문서'];
 const statuses = [
@@ -51,30 +51,12 @@ const convertToDocumentListItem = (doc: DocumentResponse): DocumentListItem => {
     deadline,
     priority,
     status: doc.status as DocumentState,
-    lastModified: doc.updatedAt ? formatRelativeTime(doc.updatedAt) : undefined,
+    lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
     assignedManager: doc.lastModifiedBy?.name,
     isFinal: false, // 나중에 버전 정보에서 가져오기
     originalUrl: doc.originalUrl,
     hasVersions: doc.hasVersions === true, // null이나 undefined는 false로 처리
   };
-};
-
-// 상대 시간 포맷팅 (예: "2시간 전")
-const formatRelativeTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 60) {
-    return `${diffMins}분 전`;
-  } else if (diffHours < 24) {
-    return `${diffHours}시간 전`;
-  } else {
-    return `${diffDays}일 전`;
-  }
 };
 
 // 검색 결과 하이라이트 컴포넌트
@@ -121,6 +103,7 @@ export default function Documents() {
   const [lockStatuses, setLockStatuses] = useState<Map<number, { locked: boolean; lockedBy?: string; lockedAt?: string }>>(new Map());
   const [deleteModalOpen, setDeleteModalOpen] = useState<boolean>(false);
   const [lockReleaseModalOpen, setLockReleaseModalOpen] = useState<boolean>(false);
+  const [manageModalOpen, setManageModalOpen] = useState<boolean>(false);
   const [selectedDocument, setSelectedDocument] = useState<DocumentListItem | null>(null);
   const isAdmin = user?.role === UserRole.SUPER_ADMIN || user?.role === UserRole.ADMIN;
 
@@ -287,8 +270,6 @@ const response = await documentApi.getAllDocuments(params);
         return sortOption.order === 'asc'
           ? aTime.localeCompare(bTime)
           : bTime.localeCompare(aTime);
-      } else if (sortOption.field === 'progress') {
-        return sortOption.order === 'asc' ? a.progress - b.progress : b.progress - a.progress;
       } else if (sortOption.field === 'title') {
         return sortOption.order === 'asc'
           ? a.title.localeCompare(b.title)
@@ -301,9 +282,18 @@ const response = await documentApi.getAllDocuments(params);
   }, [documents, selectedCategory, selectedStatus, selectedManager, selectedPriority, selectedAuthor, searchTerm, dateRangeStart, dateRangeEnd, sortOption]);
 
   const handleManage = (doc: DocumentListItem) => {
-    // 문서 관리 화면으로 이동 (나중에 구현)
-    console.log('문서 관리:', doc.id);
-    // navigate(`/documents/${doc.id}/manage`);
+    setSelectedDocument(doc);
+    setManageModalOpen(true);
+  };
+
+  const handleManageLockRelease = () => {
+    setManageModalOpen(false);
+    setLockReleaseModalOpen(true);
+  };
+
+  const handleManageDelete = () => {
+    setManageModalOpen(false);
+    setDeleteModalOpen(true);
   };
 
   const handleToggleFavorite = async (doc: DocumentListItem, e: React.MouseEvent) => {
@@ -368,10 +358,10 @@ const response = await documentApi.getAllDocuments(params);
       });
       setLockReleaseModalOpen(false);
       setSelectedDocument(null);
-      alert('문서 락이 해제되었습니다.');
+      alert('편집 권한이 회수되었습니다.');
     } catch (error) {
-      console.error('락 해제 실패:', error);
-      alert('락 해제에 실패했습니다.');
+      console.error('편집 권한 회수 실패:', error);
+      alert('편집 권한 회수에 실패했습니다.');
     }
   };
 
@@ -555,12 +545,6 @@ const response = await documentApi.getAllDocuments(params);
       },
     },
     {
-      key: 'progress',
-      label: '작업 진행률',
-      width: '12%',
-      render: (item) => <ProgressBar progress={item.progress} />,
-    },
-    {
       key: 'lastModified',
       label: '마지막 수정',
       width: '12%',
@@ -594,7 +578,7 @@ const response = await documentApi.getAllDocuments(params);
     },
     {
       key: 'lockStatus',
-      label: '락 상태',
+      label: '작업자',
       width: '10%',
       render: (item) => {
         const lockStatus = lockStatuses.get(item.id);
@@ -606,7 +590,7 @@ const response = await documentApi.getAllDocuments(params);
               {lockStatus.lockedBy || '알 수 없음'}
             </span>
             {isOld && (
-              <span style={{ color: '#dc3545', fontSize: '11px' }}>오래된 락</span>
+              <span style={{ color: '#dc3545', fontSize: '11px' }}>24시간 이상 편집 중</span>
             )}
           </div>
         );
@@ -656,9 +640,8 @@ const response = await documentApi.getAllDocuments(params);
                     variant={isOldLock ? 'danger' : 'secondary'}
                     onClick={(e) => handleLockReleaseClick(item, e)}
                     style={{ fontSize: '12px', padding: '6px 12px' }}
-                    title={isOldLock ? '오래된 락 회수' : '락 강제 해제'}
                   >
-                    락 해제
+                    편집 권한 회수
                   </Button>
                 )}
                 <Button
@@ -928,8 +911,6 @@ const response = await documentApi.getAllDocuments(params);
             >
               <option value="lastModified-desc">최근 수정순</option>
               <option value="lastModified-asc">오래된 수정순</option>
-              <option value="progress-desc">진행률 높은 순</option>
-              <option value="progress-asc">진행률 낮은 순</option>
               <option value="title-asc">제목 가나다순</option>
             </select>
           </div>
@@ -979,25 +960,118 @@ const response = await documentApi.getAllDocuments(params);
           </p>
         </Modal>
 
-        {/* 락 해제 확인 모달 */}
+        {/* 문서 관리 모달 */}
+        {manageModalOpen && selectedDocument && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}
+            onClick={() => {
+              setManageModalOpen(false);
+              setSelectedDocument(null);
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: colors.surface,
+                borderRadius: '8px',
+                padding: '24px',
+                maxWidth: '480px',
+                width: '90%',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#000000', marginBottom: '16px' }}>
+                문서 관리
+              </h2>
+              <div style={{ marginBottom: '20px', color: colors.primaryText, fontSize: '14px' }}>
+                <p style={{ marginBottom: '8px' }}><strong>제목:</strong> {selectedDocument.title}</p>
+                <p style={{ marginBottom: '8px' }}><strong>상태:</strong> {
+                  { DRAFT: '초안', PENDING_TRANSLATION: '번역 대기', IN_TRANSLATION: '번역 중',
+                    PENDING_REVIEW: '검토 대기', APPROVED: '번역 완료', PUBLISHED: '공개됨' }[selectedDocument.status] || selectedDocument.status
+                }</p>
+                <p style={{ marginBottom: '8px' }}><strong>카테고리:</strong> {selectedDocument.category}</p>
+                <p style={{ marginBottom: '12px' }}><strong>최근 수정:</strong> {selectedDocument.lastModified || '-'}</p>
+                {(() => {
+                  const lockStatus = lockStatuses.get(selectedDocument.id);
+                  const isOld = lockStatus?.locked ? isLockOld(lockStatus.lockedAt) : false;
+                  return (
+                    <div style={{ padding: '12px', backgroundColor: lockStatus?.locked ? (isOld ? '#fff5f5' : '#f8f9fa') : '#f8f9fa', borderRadius: '4px' }}>
+                      <p style={{ marginBottom: '4px' }}><strong>현재 작업자:</strong> {lockStatus?.locked ? (lockStatus.lockedBy || '알 수 없음') : '-'}</p>
+                      <p style={{ marginBottom: 0, fontSize: '13px' }}>
+                        <strong>작업 시작 시각:</strong> {lockStatus?.locked && lockStatus.lockedAt ? formatLastModifiedDateDisplay(lockStatus.lockedAt) : '-'}
+                      </p>
+                      {lockStatus?.locked && isOld && (
+                        <p style={{ marginTop: '8px', marginBottom: 0, color: '#dc3545', fontSize: '12px' }}>
+                          24시간 이상 편집 중입니다. 필요 시 편집 권한을 회수할 수 있습니다.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <Button variant="secondary" onClick={() => { setManageModalOpen(false); setSelectedDocument(null); }}>
+                  닫기
+                </Button>
+                {isAdmin && (() => {
+                  const lockStatus = lockStatuses.get(selectedDocument.id);
+                  const isLocked = lockStatus?.locked;
+                  return (
+                    <>
+                      {isLocked && (
+                        <Button
+                          variant={isLockOld(lockStatus?.lockedAt) ? 'danger' : 'secondary'}
+                          onClick={handleManageLockRelease}
+                          style={{ fontSize: '13px', padding: '8px 16px' }}
+                        >
+                          편집 권한 회수
+                        </Button>
+                      )}
+                      <Button
+                        variant="danger"
+                        onClick={handleManageDelete}
+                        style={{ fontSize: '13px', padding: '8px 16px' }}
+                      >
+                        삭제
+                      </Button>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 편집 권한 회수 확인 모달 */}
         <Modal
           isOpen={lockReleaseModalOpen}
           onClose={() => {
             setLockReleaseModalOpen(false);
             setSelectedDocument(null);
           }}
-          title="문서 락 강제 해제"
+          title="편집 권한 회수"
           onConfirm={handleLockReleaseConfirm}
-          confirmText="해제"
+          confirmText="회수"
           cancelText="취소"
           variant="danger"
         >
           <p>
-            "{selectedDocument?.title}" 문서의 락을 강제로 해제하시겠습니까?
+            "{selectedDocument?.title}" 문서의 편집 권한을 회수하시겠습니까?
             {selectedDocument && lockStatuses.get(selectedDocument.id)?.lockedBy && (
               <>
                 <br />
-                현재 락 보유자: {lockStatuses.get(selectedDocument.id)?.lockedBy}
+                현재 작업자: {lockStatuses.get(selectedDocument.id)?.lockedBy}
               </>
             )}
           </p>

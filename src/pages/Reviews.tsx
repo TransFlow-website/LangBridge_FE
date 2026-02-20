@@ -9,24 +9,7 @@ import { Button } from '../components/Button';
 import { documentApi, DocumentResponse } from '../services/documentApi';
 import { reviewApi, ReviewResponse } from '../services/reviewApi';
 import { categoryApi, CategoryResponse } from '../services/categoryApi';
-
-// 상대 시간 포맷팅 (예: "2시간 전")
-const formatRelativeTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 60) {
-    return `${diffMins}분 전`;
-  } else if (diffHours < 24) {
-    return `${diffHours}시간 전`;
-  } else {
-    return `${diffDays}일 전`;
-  }
-};
+import { formatLastModifiedDate } from '../utils/dateUtils';
 
 // Review와 Document를 결합한 인터페이스
 interface ReviewDocumentItem extends DocumentListItem {
@@ -114,12 +97,12 @@ export default function Reviews() {
             deadline,
             priority: Priority.MEDIUM,
             status: doc.status as DocumentState,
-            lastModified: doc.updatedAt ? formatRelativeTime(doc.updatedAt) : undefined,
+            lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
             assignedManager: doc.lastModifiedBy?.name,
             isFinal: false,
             originalUrl: doc.originalUrl,
             reviewId: review?.id,
-            reviewCreatedAt: review?.createdAt ? formatRelativeTime(review.createdAt) : undefined,
+            reviewCreatedAt: review?.createdAt ? formatLastModifiedDate(review.createdAt) : undefined,
             reviewerName: review?.reviewer?.name,
             versionNumber: review?.documentVersion?.versionNumber,
             isComplete: review?.isComplete,

@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { documentApi, DocumentResponse, DocumentVersionResponse } from '../services/documentApi';
 import { colors } from '../constants/designTokens';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { DocumentState } from '../types/translation';
 import ErrorBoundary from '../components/ErrorBoundary';
+import { formatLastModifiedDateDisplay } from '../utils/dateUtils';
 
 export default function DocumentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const from = searchParams.get('from');
   const documentId = id ? parseInt(id, 10) : null;
 
   const [loading, setLoading] = useState(true);
@@ -32,6 +35,11 @@ export default function DocumentDetail() {
     versionType: string;
   }>({ version: null, versionType: '' });
 
+  // 인계 메모 모달
+  const [showHandoverModal, setShowHandoverModal] = useState(false);
+  // 번역 대기로 전환 (from=handover 시)
+  const [convertingToPending, setConvertingToPending] = useState(false);
+
   // iframe refs
   const originalIframeRef = useRef<HTMLIFrameElement>(null);
   const aiDraftIframeRef = useRef<HTMLIFrameElement>(null);
@@ -53,6 +61,45 @@ export default function DocumentDetail() {
   // 전체화면 토글
   const toggleFullscreen = (panelId: string) => {
     setFullscreenPanel(prev => prev === panelId ? null : panelId);
+  };
+
+  // 번역 대기로 전환 (from=handover 시 관리자 액션)
+  const handleConvertToPending = async () => {
+    if (!documentId || !document) return;
+    if (!window.confirm(`"${document.title}" 문서를 번역 대기 상태로 전환하시겠습니까?`)) return;
+    try {
+      setConvertingToPending(true);
+      const versions = await documentApi.getDocumentVersions(documentId);
+      const latestTranslation = versions
+        .filter((v) => v.versionType === 'MANUAL_TRANSLATION' || v.versionType === 'AI_DRAFT')
+        .sort((a, b) => b.versionNumber - a.versionNumber)[0];
+      if (latestTranslation?.content) {
+        await documentApi.createDocumentVersion(documentId, {
+          versionType: 'MANUAL_TRANSLATION',
+          content: latestTranslation.content,
+        });
+      }
+      await documentApi.updateDocumentStatus(documentId, 'PENDING_TRANSLATION');
+      setDocument((prev) => prev ? { ...prev, status: 'PENDING_TRANSLATION' } : null);
+      // 새 버전 반영을 위해 버전 목록 다시 로드
+      const newVersions = await documentApi.getDocumentVersions(documentId);
+      setVersions(newVersions);
+      const aiDraft = newVersions.find((v) => v.versionType === 'AI_DRAFT');
+      const latestManual = newVersions
+        .filter((v) => v.versionType === 'MANUAL_TRANSLATION')
+        .sort((a, b) => b.versionNumber - a.versionNumber)[0];
+      const newCurrent = latestManual || aiDraft;
+      if (newCurrent) {
+        setCurrentVersionInfo({ version: newCurrent, versionType: newCurrent.versionType });
+        setCurrentVersionHtml(newCurrent.content);
+      }
+      alert('번역 대기 상태로 전환했습니다.');
+    } catch (err: any) {
+      console.error('번역 대기 전환 실패:', err);
+      alert('번역 대기로 전환에 실패했습니다.');
+    } finally {
+      setConvertingToPending(false);
+    }
   };
 
   // 초기 데이터 로드
@@ -100,9 +147,12 @@ export default function DocumentDetail() {
                           aiDraftVersion;
           currentVersionType = currentVersion?.versionType || '';
         } else if (status === DocumentState.DRAFT || status === DocumentState.PENDING_TRANSLATION) {
-          // 초안/번역 대기: AI_DRAFT
-          currentVersion = aiDraftVersion;
-          currentVersionType = 'AI_DRAFT';
+          // 초안/번역 대기: MANUAL_TRANSLATION이 있으면(인계 전환 등) 최신 MANUAL, 없으면 AI_DRAFT
+          const latestManual = versionList
+            .filter(v => v.versionType === 'MANUAL_TRANSLATION')
+            .sort((a, b) => b.versionNumber - a.versionNumber)[0];
+          currentVersion = latestManual || aiDraftVersion;
+          currentVersionType = currentVersion?.versionType || '';
         }
 
         setOriginalHtml(originalVersion?.content || '');
@@ -269,7 +319,7 @@ export default function DocumentDetail() {
         >
           <h2 style={{ color: '#d32f2f', marginBottom: '16px' }}>오류</h2>
           <p style={{ color: colors.primaryText, marginBottom: '16px' }}>{error}</p>
-          <Button variant="secondary" onClick={() => navigate('/documents')}>
+          <Button variant="secondary" onClick={() => navigate(from === 'pending' ? '/translations/pending' : from === 'working' ? '/translations/working' : from === 'favorites' ? '/translations/favorites' : '/documents')}>
             문서 목록으로 돌아가기
           </Button>
         </div>
@@ -297,7 +347,7 @@ export default function DocumentDetail() {
           }}
         >
           <p style={{ color: colors.primaryText }}>문서를 찾을 수 없습니다.</p>
-          <Button variant="secondary" onClick={() => navigate('/documents')}>
+          <Button variant="secondary" onClick={() => navigate(from === 'pending' ? '/translations/pending' : from === 'working' ? '/translations/working' : from === 'favorites' ? '/translations/favorites' : '/documents')}>
             문서 목록으로 돌아가기
           </Button>
         </div>
@@ -366,14 +416,33 @@ export default function DocumentDetail() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1 }}>
             <Button
               variant="secondary"
-              onClick={() => navigate('/documents')}
+              onClick={() => navigate(
+                from === 'pending' ? '/translations/pending'
+                : from === 'working' ? '/translations/working'
+                : from === 'favorites' ? '/translations/favorites'
+                : from === 'handover' ? '/documents/handovers'
+                : '/documents'
+              )}
               style={{ fontSize: '12px', padding: '6px 12px' }}
             >
               ← 뒤로가기
             </Button>
-            
+
             {document && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {document.latestHandover && from === 'handover' && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowHandoverModal(true)}
+                    style={{ fontSize: '12px', padding: '6px 12px', whiteSpace: 'nowrap', borderColor: '#FFB300', color: '#B8860B', backgroundColor: '#FFFDE7' }}
+                  >
+                    📋 인계 메모 확인
+                  </Button>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <div style={{ fontSize: '12px', color: colors.secondaryText, marginBottom: '2px' }}>
+                    최근 수정: {formatLastModifiedDateDisplay(document.updatedAt) || '-'}
+                  </div>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: '#000000' }}>
                   {document.title}
                 </div>
@@ -388,12 +457,13 @@ export default function DocumentDetail() {
                     }
                   </span>
                 </div>
+                </div>
               </div>
             )}
           </div>
           
           {/* 중앙: 문서 보기 옵션 (체크박스로 각 버전 표시/숨김) */}
-          <div style={{ 
+          <div style={{
             display: 'flex', 
             alignItems: 'center', 
             gap: '24px',
@@ -468,6 +538,30 @@ export default function DocumentDetail() {
               </span>
             </label>
           </div>
+
+          {/* 우측: from=handover 시 번역 대기로 전환, 그 외 번역 대기 문서일 때 번역하기 */}
+          {from === 'handover' ? (
+            document?.status !== 'PENDING_TRANSLATION' ? (
+              <Button
+                variant="primary"
+                onClick={handleConvertToPending}
+                disabled={convertingToPending}
+                style={{ fontSize: '13px', padding: '8px 20px', whiteSpace: 'nowrap' }}
+              >
+                {convertingToPending ? '전환 중...' : '번역 대기로 전환'}
+              </Button>
+            ) : (
+              <span style={{ fontSize: '13px', color: '#28A745', fontWeight: 600 }}>전환 완료</span>
+            )
+          ) : document?.status === 'PENDING_TRANSLATION' ? (
+            <Button
+              variant="primary"
+              onClick={() => navigate(`/translations/${documentId}/work`)}
+              style={{ fontSize: '13px', padding: '8px 20px', whiteSpace: 'nowrap' }}
+            >
+              번역하기
+            </Button>
+          ) : null}
         </div>
 
         {/* 3단 레이아웃 */}
@@ -558,6 +652,59 @@ export default function DocumentDetail() {
           })}
         </div>
       </div>
+
+      {/* 인계 메모 확인 모달 */}
+      {showHandoverModal && document?.latestHandover && (
+        <div
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={() => setShowHandoverModal(false)}
+        >
+          <div
+            style={{ backgroundColor: colors.surface, borderRadius: '8px', padding: '28px', maxWidth: '500px', width: '90%', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', maxHeight: '90vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#000000', marginBottom: '20px' }}>
+              인계 메모 확인
+            </h2>
+            <div style={{ backgroundColor: '#FFF9EC', border: '1px solid #FFE082', borderRadius: '6px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {(() => {
+                const h = document.latestHandover!;
+                return (
+                  <>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
+                      <span style={{ fontSize: '12px', color: colors.secondaryText, minWidth: '80px', flexShrink: 0 }}>인계자</span>
+                      <span style={{ fontSize: '13px', color: '#000000' }}>{h.handedOverBy?.name || '-'}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
+                      <span style={{ fontSize: '12px', color: colors.secondaryText, minWidth: '80px', flexShrink: 0 }}>인계 시각</span>
+                      <span style={{ fontSize: '13px', color: '#000000' }}>{formatLastModifiedDateDisplay(h.handedOverAt)}</span>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '12px', color: colors.secondaryText, display: 'block', marginBottom: '6px' }}>남은 작업 메모</span>
+                      <div style={{ fontSize: '13px', color: '#000000', whiteSpace: 'pre-wrap', lineHeight: '1.6', padding: '10px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${colors.border}` }}>
+                        {h.memo || '-'}
+                      </div>
+                    </div>
+                    {h.terms && (
+                      <div>
+                        <span style={{ fontSize: '12px', color: colors.secondaryText, display: 'block', marginBottom: '6px' }}>주의 용어/표현</span>
+                        <div style={{ fontSize: '13px', color: '#000000', whiteSpace: 'pre-wrap', lineHeight: '1.6', padding: '10px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${colors.border}` }}>
+                          {h.terms}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <Button variant="secondary" onClick={() => setShowHandoverModal(false)}>
+                닫기
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </ErrorBoundary>
   );
 }

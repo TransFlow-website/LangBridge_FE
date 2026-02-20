@@ -81,13 +81,19 @@ export const Sidebar: React.FC = () => {
 
   // 현재 경로에 따라 자동으로 메뉴 확장
   useEffect(() => {
-    filteredMenu.forEach((item) => {
-      if (item.children) {
-        const hasActiveChild = item.children.some((child) => isActive(child.path));
-        if (hasActiveChild) {
-          setExpandedMenus((prev) => new Set(prev).add(item.key));
+    setExpandedMenus((prev) => {
+      const next = new Set(prev);
+      filteredMenu.forEach((item) => {
+        if (item.children) {
+          const hasActiveChild = item.children.some((child) => isActive(child.path));
+          // 번역 작업 상세(/translations/:id/work)에 있을 때도 '번역 작업' 메뉴 확장 유지
+          const isTranslationWorkPage = item.key === 'translation_work' && /^\/translations\/\d+\/work$/.test(location.pathname);
+          if (hasActiveChild || isTranslationWorkPage) {
+            next.add(item.key);
+          }
         }
-      }
+      });
+      return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
@@ -143,7 +149,7 @@ export const Sidebar: React.FC = () => {
         size={16}
         strokeWidth={1.75}
         style={{ 
-          color: isActive ? colors.accent : colors.primaryText,
+          color: '#000000',
         }}
       />
     );
@@ -192,7 +198,7 @@ export const Sidebar: React.FC = () => {
             `}
             style={{
               padding: spacing.menuItemPadding,
-              color: isActiveState ? menuStates.active.text : colors.primaryText,
+              color: '#000000',
               backgroundColor: isActiveState ? menuStates.active.background : 'transparent',
             }}
             aria-label={item.label}
@@ -203,8 +209,9 @@ export const Sidebar: React.FC = () => {
           {/* Tooltip */}
           {hoveredMenu === item.key && !hasChildren && (
             <div
-              className="absolute left-full ml-2 px-3 py-2 bg-[#1F2937] text-white text-xs rounded whitespace-nowrap z-50 pointer-events-none"
+              className="absolute left-full ml-2 px-3 py-2 bg-white border border-[#BCCCDC] text-xs rounded whitespace-nowrap z-50 pointer-events-none"
               style={{
+                color: '#000000',
                 fontSize: typography.fontSize.sidebarMenu,
                 fontFamily: typography.fontFamily,
               }}
@@ -240,7 +247,7 @@ export const Sidebar: React.FC = () => {
                     fontSize: typography.fontSize.sidebarSubMenu,
                     fontFamily: typography.fontFamily,
                     fontWeight: typography.fontWeight.subMenu,
-                    color: isSubMenuActive(child) ? menuStates.subMenuActive.text : colors.primaryText,
+                    color: '#000000',
                     backgroundColor: isSubMenuActive(child) ? menuStates.subMenuActive.background : 'transparent',
                   }}
                 >
@@ -275,7 +282,7 @@ export const Sidebar: React.FC = () => {
             fontFamily: typography.fontFamily,
             fontWeight: isActiveState ? 600 : typography.fontWeight.menu, // Active일 때 더 두껍게
             lineHeight: typography.lineHeight,
-            color: isActiveState ? menuStates.active.text : colors.primaryText,
+            color: '#000000',
             backgroundColor: isActiveState ? menuStates.active.background : 'transparent',
           }}
           aria-label={item.label}
@@ -286,7 +293,7 @@ export const Sidebar: React.FC = () => {
             <span>{item.label}</span>
           </div>
           {hasChildren && (
-            <div className="flex-shrink-0">
+            <div className="flex-shrink-0" style={{ color: '#000000' }}>
               {isExpanded ? (
                 <ChevronUp size={16} strokeWidth={1.75} />
               ) : (
@@ -333,7 +340,7 @@ export const Sidebar: React.FC = () => {
                   fontFamily: typography.fontFamily,
                   fontWeight: isSubMenuActive(child) ? 500 : typography.fontWeight.subMenu, // Active일 때 더 두껍게
                   lineHeight: typography.lineHeight,
-                  color: isSubMenuActive(child) ? menuStates.subMenuActive.text : colors.primaryText,
+                  color: '#000000',
                   backgroundColor: isSubMenuActive(child) ? menuStates.subMenuActive.background : 'transparent',
                 }}
               >
@@ -391,7 +398,7 @@ export const Sidebar: React.FC = () => {
               <span
                 className="font-semibold"
                 style={{
-                  color: colors.primaryText,
+                  color: '#000000',
                   fontSize: typography.fontSize.body,
                   fontFamily: typography.fontFamily,
                 }}
@@ -415,7 +422,7 @@ export const Sidebar: React.FC = () => {
                 onClick={toggleCollapse}
                 className="p-1 rounded-lg hover:bg-[rgba(217,234,253,0.6)] transition-colors"
                 style={{
-                  color: colors.primaryText,
+                  color: '#000000',
                   backgroundColor: 'transparent',
                   transitionDuration: transitions.duration,
                 }}
@@ -431,7 +438,7 @@ export const Sidebar: React.FC = () => {
                 onClick={toggleCollapse}
                 className="p-2 rounded-lg hover:bg-[rgba(192,192,192,0.4)] transition-colors"
                 style={{
-                  color: colors.primaryText,
+                  color: '#000000',
                   backgroundColor: 'transparent',
                   transitionDuration: transitions.duration,
                 }}
@@ -444,7 +451,7 @@ export const Sidebar: React.FC = () => {
               onClick={() => setIsMobileOpen(false)}
               className="lg:hidden p-2 rounded-lg hover:bg-[rgba(217,234,253,0.6)] transition-colors"
               style={{
-                color: colors.primaryText,
+                color: '#000000',
                 backgroundColor: 'transparent',
                 transitionDuration: transitions.duration,
               }}
@@ -498,7 +505,7 @@ export const Sidebar: React.FC = () => {
                   borderRadius: sizes.borderRadius,
                   backgroundColor: 'transparent',
                   border: 'none',
-                  color: colors.primaryText,
+                  color: '#000000',
                   fontSize: typography.fontSize.sidebarMenu,
                   fontWeight: typography.fontWeight.menu,
                   cursor: 'pointer',
@@ -526,7 +533,7 @@ export const Sidebar: React.FC = () => {
         className="lg:hidden fixed top-4 left-4 z-30 p-2 bg-white rounded-lg border transition-colors"
         style={{
           borderColor: colors.border,
-          color: colors.primaryText,
+          color: '#000000',
           transitionDuration: transitions.duration,
         }}
         aria-label="Open menu"

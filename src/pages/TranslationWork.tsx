@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { translationWorkApi, LockStatusResponse } from '../services/translationWorkApi';
 import { documentApi, DocumentResponse } from '../services/documentApi';
 import { documentApi as docApi, DocumentVersionResponse } from '../services/documentApi';
@@ -20,6 +20,8 @@ import './TranslationWork.css';
 export default function TranslationWork() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromPath = (location.state as { from?: string } | null)?.from || '/translations/pending';
   const documentId = id ? parseInt(id, 10) : null;
 
   const [loading, setLoading] = useState(true);
@@ -32,8 +34,10 @@ export default function TranslationWork() {
   const [completedParagraphs, setCompletedParagraphs] = useState<Set<number>>(new Set());
   const [highlightedParagraphIndex, setHighlightedParagraphIndex] = useState<number | null>(null);
   const [showHandoverModal, setShowHandoverModal] = useState(false);
+  const [handoverSubmitting, setHandoverSubmitting] = useState(false);
   const [handoverMemo, setHandoverMemo] = useState('');
   const [handoverTerms, setHandoverTerms] = useState('');
+  const [showHandoverInfoModal, setShowHandoverInfoModal] = useState(false);
   
   // 링크 편집 모달 상태
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -130,24 +134,6 @@ export default function TranslationWork() {
         const doc = await documentApi.getDocument(documentId);
         console.log('✅ 문서 조회 성공:', doc);
         setDocument(doc);
-
-        // 인계 정보가 있으면 알림 표시
-        if (doc.latestHandover) {
-          const handover = doc.latestHandover;
-          const handoverMessage = `📋 이전 번역자의 인계 메모:\n\n${handover.memo}\n\n` +
-            (handover.terms ? `⚠️ 주의 용어/표현: ${handover.terms}\n\n` : '') +
-            (handover.completedParagraphs && handover.completedParagraphs.length > 0
-              ? `✅ 완료된 문단: ${handover.completedParagraphs.join(', ')}\n\n`
-              : '') +
-            (handover.handedOverBy
-              ? `👤 인계자: ${handover.handedOverBy.name}\n`
-              : '');
-          
-          // 약간의 지연 후 표시 (페이지 로드 후)
-          setTimeout(() => {
-            alert(handoverMessage);
-          }, 500);
-        }
 
         // 2. 락 획득 시도 (재시도 로직 포함)
         console.log('🔒 락 획득 시도:', documentId);
@@ -1477,17 +1463,29 @@ export default function TranslationWork() {
       alert('남은 작업 메모를 입력해주세요.');
       return;
     }
+    if (!savedTranslationHtml) {
+      alert('저장할 번역 내용이 없습니다.');
+      return;
+    }
 
     try {
+      setHandoverSubmitting(true);
+      // 1. 현 지점으로 먼저 저장
+      await translationWorkApi.saveTranslation(documentId, {
+        content: savedTranslationHtml,
+        completedParagraphs: Array.from(completedParagraphs),
+      });
+      // 2. 인계 요청
       await translationWorkApi.handover(documentId, {
         memo: handoverMemo.trim(),
         terms: handoverTerms.trim() || undefined,
-        completedParagraphs: Array.from(completedParagraphs),
       });
       alert('인계가 완료되었습니다.');
-      navigate('/translations/pending');
+      navigate(fromPath);
     } catch (error: any) {
       alert('인계 실패: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setHandoverSubmitting(false);
     }
   };
 
@@ -1504,7 +1502,7 @@ export default function TranslationWork() {
         completedParagraphs: Array.from(completedParagraphs),
       });
       alert('번역이 완료되었습니다!');
-      navigate('/translations/pending');
+      navigate(fromPath);
     } catch (error: any) {
       alert('완료 처리 실패: ' + (error.response?.data?.message || error.message));
     }
@@ -1535,7 +1533,7 @@ export default function TranslationWork() {
           ⚠️ {error || '문서를 불러올 수 없습니다.'}
         </div>
         <div>
-          <Button variant="secondary" onClick={() => navigate('/translations/pending')}>
+          <Button variant="secondary" onClick={() => navigate(fromPath)}>
             목록으로 돌아가기
           </Button>
         </div>
@@ -1601,7 +1599,7 @@ export default function TranslationWork() {
                 if (!confirmed) return;
               }
               
-              navigate('/translations/pending');
+              navigate(fromPath);
             }} 
             style={{ fontSize: '12px', padding: '6px 12px' }}
           >
@@ -1627,6 +1625,17 @@ export default function TranslationWork() {
           )}
         </div>
         
+        {/* 인계 메모 확인 버튼 (인계 정보가 있을 때만) */}
+        {document?.latestHandover && (
+          <Button
+            variant="secondary"
+            onClick={() => setShowHandoverInfoModal(true)}
+            style={{ fontSize: '12px', padding: '6px 14px', color: '#FF6B00', borderColor: '#FF6B00', whiteSpace: 'nowrap' }}
+          >
+            📋 인계 메모 확인
+          </Button>
+        )}
+
         {/* 중앙: 문서 보기 옵션 (체크박스로 각 버전 표시/숨김) */}
         <div style={{ 
           display: 'flex', 
@@ -2935,6 +2944,59 @@ export default function TranslationWork() {
         })}
       </div>
 
+      {/* 인계 메모 확인 모달 */}
+      {showHandoverInfoModal && document?.latestHandover && (() => {
+        const h = document.latestHandover!;
+        return (
+          <div
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
+            onClick={() => setShowHandoverInfoModal(false)}
+          >
+            <div
+              style={{ backgroundColor: colors.surface, padding: '24px', borderRadius: '8px', width: '500px', maxWidth: '90vw', border: `1px solid ${colors.border}`, maxHeight: '80vh', overflowY: 'auto' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px', color: '#000000' }}>
+                📋 이전 번역자 인계 메모
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
+                {h.handedOverBy && (
+                  <div>
+                    <span style={{ fontSize: '12px', color: colors.secondaryText, display: 'block', marginBottom: '4px' }}>인계자</span>
+                    <span style={{ fontSize: '13px', color: '#000000' }}>{h.handedOverBy.name}</span>
+                  </div>
+                )}
+                {h.handedOverAt && (
+                  <div>
+                    <span style={{ fontSize: '12px', color: colors.secondaryText, display: 'block', marginBottom: '4px' }}>인계 시각</span>
+                    <span style={{ fontSize: '13px', color: '#000000' }}>{new Date(h.handedOverAt).toLocaleString('ko-KR')}</span>
+                  </div>
+                )}
+                <div>
+                  <span style={{ fontSize: '12px', color: colors.secondaryText, display: 'block', marginBottom: '6px' }}>남은 작업 메모</span>
+                  <div style={{ fontSize: '13px', color: '#000000', whiteSpace: 'pre-wrap', lineHeight: '1.6', padding: '10px', backgroundColor: '#FFF9EC', border: '1px solid #FFE082', borderRadius: '4px' }}>
+                    {h.memo}
+                  </div>
+                </div>
+                {h.terms && (
+                  <div>
+                    <span style={{ fontSize: '12px', color: colors.secondaryText, display: 'block', marginBottom: '6px' }}>주의 용어/표현</span>
+                    <div style={{ fontSize: '13px', color: '#000000', whiteSpace: 'pre-wrap', lineHeight: '1.6', padding: '10px', backgroundColor: '#FFF9EC', border: '1px solid #FFE082', borderRadius: '4px' }}>
+                      {h.terms}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button variant="secondary" onClick={() => setShowHandoverInfoModal(false)} style={{ fontSize: '12px' }}>
+                  닫기
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 인계 요청 모달 */}
       {showHandoverModal && (
         <div
@@ -2966,15 +3028,6 @@ export default function TranslationWork() {
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>
               인계 요청
             </h3>
-            
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: colors.primaryText }}>
-                완료한 문단 범위 *
-              </label>
-              <div style={{ fontSize: '12px', color: colors.secondaryText, marginBottom: '8px' }}>
-                완료된 문단: {completedParagraphs.size}개 / 전체: {progress.total}개
-              </div>
-            </div>
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: colors.primaryText }}>
@@ -3033,9 +3086,10 @@ export default function TranslationWork() {
               <Button
                 variant="primary"
                 onClick={confirmHandover}
+                disabled={handoverSubmitting}
                 style={{ fontSize: '12px' }}
               >
-                인계 요청
+                {handoverSubmitting ? '처리 중...' : '인계 요청'}
               </Button>
             </div>
           </div>

@@ -41,6 +41,7 @@ export const sidebarMenu: MenuItem[] = [
     icon: 'FolderOpen',
     children: [
       { label: '전체 문서', path: '/documents' },
+      { label: '인계 요청 문서', path: '/documents/handovers' },
     ],
   },
   {

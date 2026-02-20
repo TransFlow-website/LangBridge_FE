@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Table, TableColumn } from '../components/Table';
-import { ProgressBar } from '../components/ProgressBar';
 import { DocumentListItem, Priority, DocumentSortOption } from '../types/document';
 import { DocumentState } from '../types/translation';
 import { colors } from '../constants/designTokens';
 import { Button } from '../components/Button';
 import { documentApi, DocumentResponse } from '../services/documentApi';
 import { categoryApi, CategoryResponse } from '../services/categoryApi';
+import { translationWorkApi } from '../services/translationWorkApi';
+import { useUser } from '../contexts/UserContext';
+import { formatLastModifiedDate } from '../utils/dateUtils';
 
 // DocumentResponse를 DocumentListItem으로 변환
 const convertToDocumentListItem = (
@@ -28,33 +30,16 @@ const convertToDocumentListItem = (
     deadline: '정보 없음',
     priority: Priority.MEDIUM,
     status: doc.status as DocumentState,
-    lastModified: doc.updatedAt ? formatRelativeTime(doc.updatedAt) : undefined,
+    lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
     assignedManager: doc.lastModifiedBy?.name,
     isFinal: false,
     originalUrl: doc.originalUrl,
   };
 };
 
-// 상대 시간 포맷팅
-const formatRelativeTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 60) {
-    return `${diffMins}분 전`;
-  } else if (diffHours < 24) {
-    return `${diffHours}시간 전`;
-  } else {
-    return `${diffDays}일 전`;
-  }
-};
-
 export default function TranslationsFavorites() {
   const navigate = useNavigate();
+  const { user } = useUser();
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +78,29 @@ export default function TranslationsFavorites() {
         const response = await documentApi.getFavoriteDocuments();
         console.log('✅ 찜한 문서 목록 조회 성공:', response.length, '개');
         
-        const converted = response.map((doc) => convertToDocumentListItem(doc, categoryMap));
+        let converted = response.map((doc) => convertToDocumentListItem(doc, categoryMap));
+        // IN_TRANSLATION 문서는 락 정보로 현재 작업자·내 락 여부 설정
+        if (user?.id) {
+          converted = await Promise.all(
+            converted.map(async (item) => {
+              if (item.status !== 'IN_TRANSLATION') return item;
+              try {
+                const lockStatus = await translationWorkApi.getLockStatus(item.id);
+                if (!lockStatus?.lockedBy) return item;
+                const lockedById = lockStatus.lockedBy.id;
+                const isMyLock = lockStatus.locked && lockStatus.canEdit &&
+                  lockedById !== undefined && Number(lockedById) === Number(user.id);
+                return {
+                  ...item,
+                  currentWorker: lockStatus.lockedBy.name,
+                  isMyLock,
+                };
+              } catch {
+                return item;
+              }
+            })
+          );
+        }
         setDocuments(converted);
         
         // 모든 문서가 찜 상태임을 설정
@@ -118,7 +125,7 @@ export default function TranslationsFavorites() {
     if (categoryMap.size > 0 || documents.length === 0) {
       fetchFavoriteDocuments();
     }
-  }, [categoryMap]);
+  }, [categoryMap, user?.id]);
 
   // 정렬
   const sortedDocuments = useMemo(() => {
@@ -131,8 +138,6 @@ export default function TranslationsFavorites() {
         return sortOption.order === 'asc'
           ? aTime.localeCompare(bTime)
           : bTime.localeCompare(aTime);
-      } else if (sortOption.field === 'progress') {
-        return sortOption.order === 'asc' ? a.progress - b.progress : b.progress - a.progress;
       } else if (sortOption.field === 'title') {
         return sortOption.order === 'asc'
           ? a.title.localeCompare(b.title)
@@ -145,7 +150,11 @@ export default function TranslationsFavorites() {
   }, [documents, sortOption]);
 
   const handleStartTranslation = (doc: DocumentListItem) => {
-    navigate(`/translations/${doc.id}/work`);
+    navigate(`/translations/${doc.id}/work`, { state: { from: '/translations/favorites' } });
+  };
+
+  const handleViewDetail = (doc: DocumentListItem) => {
+    navigate(`/documents/${doc.id}?from=favorites`);
   };
 
   const handleToggleFavorite = async (doc: DocumentListItem, e: React.MouseEvent) => {
@@ -215,7 +224,6 @@ export default function TranslationsFavorites() {
       render: (item) => {
         let statusColor = colors.primaryText;
         let statusWeight = 400;
-        
         if (item.status === 'IN_TRANSLATION') {
           statusColor = '#FF6B00';
           statusWeight = 600;
@@ -223,13 +231,8 @@ export default function TranslationsFavorites() {
           statusColor = '#28A745';
           statusWeight = 600;
         }
-        
         return (
-          <span style={{ 
-            color: statusColor, 
-            fontSize: '12px',
-            fontWeight: statusWeight,
-          }}>
+          <span style={{ color: statusColor, fontSize: '12px', fontWeight: statusWeight }}>
             {getStatusText(item.status)}
           </span>
         );
@@ -238,7 +241,7 @@ export default function TranslationsFavorites() {
     {
       key: 'category',
       label: '카테고리',
-      width: '15%',
+      width: '8%',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>{item.category}</span>
       ),
@@ -246,7 +249,7 @@ export default function TranslationsFavorites() {
     {
       key: 'lastModified',
       label: '최근 수정',
-      width: '15%',
+      width: '10%',
       align: 'right',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
@@ -255,10 +258,36 @@ export default function TranslationsFavorites() {
       ),
     },
     {
-      key: 'progress',
-      label: '작업 진행률',
-      width: '15%',
-      render: (item) => <ProgressBar progress={item.progress} />,
+      key: 'currentWorker',
+      label: '작업자',
+      width: '10%',
+      render: (item) => (
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+          {item.currentWorker || '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'currentVersion',
+      label: '현재 버전',
+      width: '8%',
+      align: 'right',
+      render: (item) => (
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+          {item.currentVersionNumber ? `v${item.currentVersionNumber}` : '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'estimatedLength',
+      label: '예상 분량',
+      width: '10%',
+      align: 'right',
+      render: (item) => (
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+          {item.estimatedLength ? `${item.estimatedLength.toLocaleString()}자` : '-'}
+        </span>
+      ),
     },
     {
       key: 'action',
@@ -266,33 +295,44 @@ export default function TranslationsFavorites() {
       width: '20%',
       align: 'right',
       render: (item) => {
+        const isPending = item.status === 'PENDING_TRANSLATION';
         const isApproved = item.status === 'APPROVED';
+        const isInTranslationMine = item.status === 'IN_TRANSLATION' && item.isMyLock;
+        const isInTranslationOther = item.status === 'IN_TRANSLATION' && !item.isMyLock;
+        const canStartOrContinue = isPending || isInTranslationMine;
         
         return (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'flex-end' }}>
             <Button
-              variant={isApproved ? 'disabled' : 'primary'}
+              variant="secondary"
               onClick={(e) => {
-                if (e) {
-                  e.stopPropagation();
-                }
-                if (!isApproved) {
-                  handleStartTranslation(item);
-                }
+                if (e) e.stopPropagation();
+                handleViewDetail(item);
               }}
-              style={{ 
-                fontSize: '12px', 
-                padding: '6px 12px',
-                ...(isApproved ? {
-                  background: '#28A745',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  cursor: 'default',
-                } : {})
-              }}
+              style={{ fontSize: '12px', padding: '6px 12px' }}
             >
-              {isApproved ? '완료' : '번역 시작'}
+              상세보기
             </Button>
+            {canStartOrContinue && (
+              <Button
+                variant="primary"
+                onClick={(e) => {
+                  if (e) e.stopPropagation();
+                  handleStartTranslation(item);
+                }}
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+              >
+                {isPending ? '번역 시작' : '이어하기'}
+              </Button>
+            )}
+            {isInTranslationOther && (
+              <span style={{ fontSize: '12px', color: '#FF6B00', fontWeight: 600 }}>
+                번역 중 {item.currentWorker ? `(${item.currentWorker})` : ''}
+              </span>
+            )}
+            {isApproved && (
+              <span style={{ fontSize: '12px', color: '#28A745', fontWeight: 600 }}>완료</span>
+            )}
           </div>
         );
       },
@@ -364,11 +404,6 @@ export default function TranslationsFavorites() {
           <Table
             data={sortedDocuments}
             columns={columns}
-            onRowClick={(item) => {
-              if (item.status !== 'APPROVED') {
-                handleStartTranslation(item);
-              }
-            }}
           />
         )}
       </div>
