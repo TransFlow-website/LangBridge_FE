@@ -101,6 +101,14 @@ export const documentApi = {
   },
 
   /**
+   * 원문 문서 ID로 복사본(다른 사람 작업물) 목록 조회
+   */
+  getCopiesBySourceId: async (sourceDocumentId: number): Promise<DocumentResponse[]> => {
+    const response = await apiClient.get<DocumentResponse[]>(`/documents/${sourceDocumentId}/copies`);
+    return response.data;
+  },
+
+  /**
    * 문서 수정
    */
   updateDocument: async (id: number, request: UpdateDocumentRequest): Promise<DocumentResponse> => {
@@ -193,6 +201,8 @@ export const documentApi = {
     status?: string;
     categoryId?: number;
     excludePendingTranslation?: boolean;
+    /** 원문만 조회(복사본 제외). 번역 대기 목록에서 원문이 항상 보이도록 할 때 사용 */
+    sourcesOnly?: boolean;
     title?: string;
   }): Promise<DocumentResponse[]> => {
     const queryParams = new URLSearchParams();
@@ -204,6 +214,9 @@ export const documentApi = {
     }
     if (params?.excludePendingTranslation) {
       queryParams.append('excludePendingTranslation', 'true');
+    }
+    if (params?.sourcesOnly) {
+      queryParams.append('sourcesOnly', 'true');
     }
     if (params?.title) {
       queryParams.append('title', params.title);
