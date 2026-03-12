@@ -5740,7 +5740,7 @@ const NewTranslation: React.FC = () => {
         console.warn('⚠️ localStorage 클리어 실패:', e);
       }
       
-      navigate('/documents');
+      navigate('/translations/pending');
     } catch (error: any) {
       console.error('❌ 문서 생성 실패:', error);
       setSaveError(error?.response?.data?.message || '문서 생성 실패');

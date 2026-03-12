@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Table, TableColumn } from '../components/Table';
 import { StatusBadge } from '../components/StatusBadge';
 import { DocumentListItem, Priority, DocumentFilter, DocumentSortOption } from '../types/document';
@@ -12,6 +13,11 @@ import { UserRole } from '../types/user';
 import { Modal } from '../components/Modal';
 import { translationWorkApi } from '../services/translationWorkApi';
 import { formatLastModifiedDate, formatLastModifiedDateDisplay } from '../utils/dateUtils';
+
+function isLockOld(lockedAt?: string): boolean {
+  if (!lockedAt) return false;
+  return Date.now() - new Date(lockedAt).getTime() > 24 * 60 * 60 * 1000;
+}
 
 const categories = ['전체', '웹사이트', '마케팅', '고객지원', '기술문서'];
 const statuses = [
@@ -41,7 +47,7 @@ const convertToDocumentListItem = (doc: DocumentResponse): DocumentListItem => {
   // 카테고리 이름 (임시로 ID 사용, 나중에 카테고리 API로 이름 가져오기)
   const category = doc.categoryId ? `카테고리 ${doc.categoryId}` : '미분류';
 
-  return {
+  const item: DocumentListItem = {
     id: doc.id,
     title: doc.title,
     category,
@@ -53,10 +59,14 @@ const convertToDocumentListItem = (doc: DocumentResponse): DocumentListItem => {
     status: doc.status as DocumentState,
     lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
     assignedManager: doc.lastModifiedBy?.name,
-    isFinal: false, // 나중에 버전 정보에서 가져오기
+    isFinal: doc.currentVersionIsFinal === true,
     originalUrl: doc.originalUrl,
-    hasVersions: doc.hasVersions === true, // null이나 undefined는 false로 처리
+    hasVersions: doc.hasVersions === true,
   };
+  if (doc.createdBy?.name) item.currentWorker = doc.createdBy.name;
+  if (doc.currentVersionId != null) item.currentVersionId = doc.currentVersionId;
+  if (doc.currentVersionNumber != null) item.currentVersionNumber = doc.currentVersionNumber;
+  return item;
 };
 
 // 검색 결과 하이라이트 컴포넌트
@@ -102,36 +112,36 @@ export default function Documents() {
   const [favoriteStatus, setFavoriteStatus] = useState<Map<number, boolean>>(new Map());
   const [lockStatuses, setLockStatuses] = useState<Map<number, { locked: boolean; lockedBy?: string; lockedAt?: string }>>(new Map());
   const [deleteModalOpen, setDeleteModalOpen] = useState<boolean>(false);
-  const [lockReleaseModalOpen, setLockReleaseModalOpen] = useState<boolean>(false);
   const [manageModalOpen, setManageModalOpen] = useState<boolean>(false);
   const [selectedDocument, setSelectedDocument] = useState<DocumentListItem | null>(null);
+  const [expandedSourceIds, setExpandedSourceIds] = useState<Set<number>>(new Set());
+  const [copiesBySourceId, setCopiesBySourceId] = useState<Map<number, DocumentListItem[]>>(new Map());
+  const [loadingCopySourceIds, setLoadingCopySourceIds] = useState<Set<number>>(new Set());
   const isAdmin = user?.role === UserRole.SUPER_ADMIN || user?.role === UserRole.ADMIN;
+
+  type RowItem = DocumentListItem & { isCopyRow?: boolean; sourceDocumentId?: number; isLoadingRow?: boolean; rowNumber?: number; hasHandoverRequest?: boolean };
 
   // API에서 문서 목록 가져오기
   useEffect(() => {
     const fetchDocuments = async () => {
       try {
         setLoading(true);
-// 전체 문서 조회 (백엔드에서 같은 URL의 최신 버전만 반환 가능)
-const params: { status?: string; categoryId?: number; title?: string } = {};
-if (searchTerm.trim()) {
-  params.title = searchTerm.trim();
-}
-if (selectedStatus !== '전체') {
-  const statusMap: Record<string, string> = {
-    '번역 대기': 'PENDING_TRANSLATION',
-    '번역 중': 'IN_TRANSLATION',
-    '검토 중': 'PENDING_REVIEW',
-    '승인 완료': 'APPROVED',
-    '게시 완료': 'PUBLISHED',
-  };
-  params.status = statusMap[selectedStatus] || selectedStatus;
-}
-if (selectedCategory !== '전체') {
-  params.categoryId = 1;
-}
+// 원문만 조회(sourcesOnly) → 목록에는 원본만, 토글 시 해당 원문을 작업 중인 문서(복사본) 표시
+        const params: { sourcesOnly?: boolean; status?: string; categoryId?: number; title?: string } = { sourcesOnly: true };
+        if (searchTerm.trim()) params.title = searchTerm.trim();
+        if (selectedStatus !== '전체') {
+          const statusMap: Record<string, string> = {
+            '번역 대기': 'PENDING_TRANSLATION',
+            '번역 중': 'IN_TRANSLATION',
+            '검토 중': 'PENDING_REVIEW',
+            '승인 완료': 'APPROVED',
+            '게시 완료': 'PUBLISHED',
+          };
+          params.status = statusMap[selectedStatus] || selectedStatus;
+        }
+        if (selectedCategory !== '전체') params.categoryId = 1;
 
-const response = await documentApi.getAllDocuments(params);
+        const response = await documentApi.getAllDocuments(params);
         const converted = response.map(convertToDocumentListItem);
         const draftOnlyCount = converted.filter(doc => 
           doc.status === DocumentState.DRAFT && (doc.hasVersions === false || doc.hasVersions === undefined)
@@ -155,35 +165,24 @@ const response = await documentApi.getAllDocuments(params);
     fetchDocuments();
   }, [searchTerm, selectedStatus, selectedCategory]);
 
-  // 찜 상태 및 락 상태 로드
+  // 찜 상태 로드 (락 제거됨)
   useEffect(() => {
     const loadStatuses = async () => {
       try {
         const favoriteMap = new Map<number, boolean>();
-        const lockMap = new Map<number, { locked: boolean; lockedBy?: string; lockedAt?: string }>();
-        
         await Promise.all(
           documents.map(async (doc) => {
             try {
-              const [isFavorite, lockStatus] = await Promise.all([
-                documentApi.isFavorite(doc.id).catch(() => false),
-                translationWorkApi.getLockStatus(doc.id).catch(() => ({ locked: false, canEdit: false })),
-              ]);
+              const isFavorite = await documentApi.isFavorite(doc.id).catch(() => false);
               favoriteMap.set(doc.id, isFavorite);
-              lockMap.set(doc.id, {
-                locked: lockStatus.locked,
-                lockedBy: lockStatus.lockedBy?.name,
-                lockedAt: lockStatus.lockedAt,
-              });
             } catch (error) {
               console.warn(`문서 ${doc.id}의 상태를 가져올 수 없습니다:`, error);
               favoriteMap.set(doc.id, false);
-              lockMap.set(doc.id, { locked: false });
             }
           })
         );
         setFavoriteStatus(favoriteMap);
-        setLockStatuses(lockMap);
+        setLockStatuses(new Map());
       } catch (error) {
         console.error('상태 로드 실패:', error);
       }
@@ -197,7 +196,11 @@ const response = await documentApi.getAllDocuments(params);
   const filteredAndSortedDocuments = useMemo(() => {
     let filtered = [...documents];
 
-    // 검색은 백엔드에서 처리하므로 프론트엔드에서는 추가 필터링만 수행
+    // 제목 검색 (sourcesOnly 사용 시 프론트에서 필터)
+    if (searchTerm.trim()) {
+      const term = searchTerm.trim().toLowerCase();
+      filtered = filtered.filter((doc) => doc.title?.toLowerCase().includes(term));
+    }
 
     // 카테고리 필터
     if (selectedCategory !== '전체') {
@@ -281,6 +284,89 @@ const response = await documentApi.getAllDocuments(params);
     return filtered;
   }, [documents, selectedCategory, selectedStatus, selectedManager, selectedPriority, selectedAuthor, searchTerm, dateRangeStart, dateRangeEnd, sortOption]);
 
+  const tableData: RowItem[] = useMemo(() => {
+    const rows: RowItem[] = [];
+    for (const item of filteredAndSortedDocuments) {
+      rows.push({ ...item, isCopyRow: false });
+      if (expandedSourceIds.has(item.id)) {
+        const copies = copiesBySourceId.get(item.id);
+        const isLoading = loadingCopySourceIds.has(item.id);
+        if (isLoading && copies === undefined) {
+          rows.push({
+            id: -item.id,
+            title: '이 문서를 수정 중인 문서 불러오는 중…',
+            isCopyRow: true,
+            sourceDocumentId: item.id,
+            isLoadingRow: true,
+            rowNumber: 1,
+          } as RowItem);
+        } else if (Array.isArray(copies)) {
+          if (copies.length === 0) {
+            rows.push({
+              id: -item.id,
+              title: '이 원문을 수정 중인 문서가 없습니다.',
+              isCopyRow: true,
+              sourceDocumentId: item.id,
+              isLoadingRow: true,
+              rowNumber: 1,
+            } as RowItem);
+          } else {
+            copies.forEach((copy, idx) => {
+              rows.push({ ...copy, isCopyRow: true, sourceDocumentId: item.id, rowNumber: idx + 1 });
+            });
+          }
+        }
+      }
+    }
+    return rows;
+  }, [filteredAndSortedDocuments, expandedSourceIds, copiesBySourceId, loadingCopySourceIds]);
+
+  const toggleSourceExpand = useCallback(async (sourceId: number) => {
+    const isCurrentlyExpanded = expandedSourceIds.has(sourceId);
+    if (isCurrentlyExpanded) {
+      setExpandedSourceIds((prev) => {
+        const next = new Set(prev);
+        next.delete(sourceId);
+        return next;
+      });
+      return;
+    }
+    setExpandedSourceIds((prev) => new Set(prev).add(sourceId));
+    if (!copiesBySourceId.has(sourceId)) {
+      setLoadingCopySourceIds((prev) => new Set(prev).add(sourceId));
+      try {
+        const copies = await documentApi.getCopiesBySourceId(sourceId);
+        const withMeta = copies.map((doc) => {
+          const listItem = convertToDocumentListItem(doc);
+          if (doc.createdBy?.name) listItem.currentWorker = doc.createdBy.name;
+          (listItem as RowItem).hasHandoverRequest = !!doc.latestHandover;
+          if (doc.currentVersionId != null) listItem.currentVersionId = doc.currentVersionId;
+          if (doc.currentVersionNumber != null) listItem.currentVersionNumber = doc.currentVersionNumber;
+          if (doc.currentVersionIsFinal != null) listItem.isFinal = doc.currentVersionIsFinal;
+          return listItem;
+        });
+        setCopiesBySourceId((prev) => {
+          const m = new Map(prev);
+          m.set(sourceId, withMeta);
+          return m;
+        });
+      } catch (e) {
+        console.warn('이 문서를 수정 중인 문서 목록 조회 실패:', sourceId, e);
+        setCopiesBySourceId((prev) => {
+          const m = new Map(prev);
+          m.set(sourceId, []);
+          return m;
+        });
+      } finally {
+        setLoadingCopySourceIds((prev) => {
+          const next = new Set(prev);
+          next.delete(sourceId);
+          return next;
+        });
+      }
+    }
+  }, [expandedSourceIds, copiesBySourceId]);
+
   const handleManage = (doc: DocumentListItem) => {
     setSelectedDocument(doc);
     setManageModalOpen(true);
@@ -288,7 +374,6 @@ const response = await documentApi.getAllDocuments(params);
 
   const handleManageLockRelease = () => {
     setManageModalOpen(false);
-    setLockReleaseModalOpen(true);
   };
 
   const handleManageDelete = () => {
@@ -333,32 +418,6 @@ const response = await documentApi.getAllDocuments(params);
       console.error('문서 삭제 실패:', error);
       alert('문서 삭제에 실패했습니다.');
     }
-  };
-
-  const handleLockReleaseConfirm = async () => {
-    if (!selectedDocument) return;
-    try {
-      await translationWorkApi.releaseLockByAdmin(selectedDocument.id);
-      setLockStatuses(prev => {
-        const newMap = new Map(prev);
-        newMap.set(selectedDocument.id, { locked: false });
-        return newMap;
-      });
-      setLockReleaseModalOpen(false);
-      setSelectedDocument(null);
-      alert('편집 권한이 회수되었습니다.');
-    } catch (error) {
-      console.error('편집 권한 회수 실패:', error);
-      alert('편집 권한 회수에 실패했습니다.');
-    }
-  };
-
-  const isLockOld = (lockedAt?: string): boolean => {
-    if (!lockedAt) return false;
-    const lockDate = new Date(lockedAt);
-    const now = new Date();
-    const hoursDiff = (now.getTime() - lockDate.getTime()) / (1000 * 60 * 60);
-    return hoursDiff > 24; // 24시간 이상
   };
 
   const handleExport = async (doc: DocumentListItem) => {
@@ -448,74 +507,179 @@ const response = await documentApi.getAllDocuments(params);
     }
   };
 
-  const columns: TableColumn<DocumentListItem>[] = [
+  const truncateUrl = (url: string, maxLen: number = 32) => {
+    if (!url || !url.trim()) return '';
+    const u = url.trim();
+    return u.length <= maxLen ? u : u.slice(0, maxLen) + '…';
+  };
+
+  const expandColumn: TableColumn<RowItem> = {
+    key: 'expand',
+    label: '',
+    width: '36px',
+    render: (item) => {
+      if (item.isCopyRow || (item as RowItem).isLoadingRow) {
+        return <span style={{ display: 'inline-block', width: 20, marginLeft: 8 }} />;
+      }
+      const expanded = expandedSourceIds.has(item.id);
+      const loading = loadingCopySourceIds.has(item.id);
+      const copies = copiesBySourceId.get(item.id);
+      const count = copies?.length ?? 0;
+      return (
+        <span style={{ display: 'flex', alignItems: 'center', color: colors.primaryText }}>
+          {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+          {expanded && loading && (
+            <span style={{ fontSize: '11px', marginLeft: 4, color: colors.secondaryText }}>…</span>
+          )}
+          {expanded && !loading && count > 0 && (
+            <span style={{ fontSize: '11px', marginLeft: 4, color: colors.secondaryText }}>({count})</span>
+          )}
+        </span>
+      );
+    },
+  };
+
+  const numberColumn: TableColumn<RowItem> = {
+    key: 'rowNumber',
+    label: '№',
+    width: '32px',
+    align: 'center',
+    render: (item) => {
+      const row = item as RowItem;
+      if (row.rowNumber != null) return <span style={{ fontSize: '12px', color: colors.secondaryText, fontWeight: 500 }}>{row.rowNumber}</span>;
+      return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>—</span>;
+    },
+  };
+
+  const columns: TableColumn<RowItem>[] = [
+    numberColumn,
+    expandColumn,
     {
       key: 'title',
       label: '문서 제목',
-      width: '25%',
+      width: 'minmax(0, 2fr)',
       render: (item) => {
+        if ((item as RowItem).isLoadingRow) {
+          return <span style={{ paddingLeft: 24, color: colors.secondaryText, fontSize: '12px' }}>{item.title}</span>;
+        }
         const isFavorite = favoriteStatus.get(item.id) || false;
         const isDraftOnly = item.status === DocumentState.DRAFT && item.hasVersions === false;
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              onClick={(e) => handleToggleFavorite(item, e)}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              paddingLeft: item.isCopyRow ? 24 : 0,
+              minWidth: 0,
+              overflow: 'hidden',
+            }}
+          >
+            {!item.isCopyRow && (
+              <button
+                onClick={(e) => handleToggleFavorite(item, e)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                  fontSize: '18px',
+                  color: isFavorite ? '#FFD700' : '#C0C0C0',
+                  transition: 'color 0.2s',
+                }}
+                title={isFavorite ? '찜 해제' : '찜 추가'}
+              >
+                {isFavorite ? '★' : '☆'}
+              </button>
+            )}
+            {!item.isCopyRow && isDraftOnly && (
+              <span style={{
+                padding: '2px 6px',
+                backgroundColor: '#FFE5B4',
+                color: '#8B4513',
+                fontSize: '10px',
+                borderRadius: '4px',
+                fontWeight: 600,
+                flexShrink: 0,
+              }}>
+                임시저장
+              </span>
+            )}
+            <span
               style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                fontSize: '18px',
-                color: isFavorite ? '#FFD700' : '#C0C0C0',
-                transition: 'color 0.2s',
+                fontWeight: item.isCopyRow ? 400 : 500,
+                color: isDraftOnly && !item.isCopyRow ? '#999' : '#000000',
+                fontStyle: isDraftOnly && !item.isCopyRow ? 'italic' : 'normal',
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
-              title={isFavorite ? '찜 해제' : '찜 추가'}
+              title={item.title}
             >
-              {isFavorite ? '★' : '☆'}
-            </button>
-{isDraftOnly && (
-  <span style={{
-    padding: '2px 6px',
-    backgroundColor: '#FFE5B4',
-    color: '#8B4513',
-    fontSize: '10px',
-    borderRadius: '4px',
-    fontWeight: 600
-  }}>
-    임시저장
-  </span>
-)}
-<span style={{ 
-  fontWeight: 500, 
-  color: isDraftOnly ? '#999' : '#000000',
-  fontStyle: isDraftOnly ? 'italic' : 'normal'
-}}>
-  <HighlightText text={item.title} searchTerm={searchTerm} />
-</span>
+              <HighlightText text={item.title} searchTerm={searchTerm} />
+            </span>
+            {item.isCopyRow && !(item as RowItem).isLoadingRow && (
+              <span style={{ fontSize: '11px', color: colors.secondaryText, flexShrink: 0 }}>(복사본)</span>
+            )}
           </div>
+        );
+      },
+    },
+    {
+      key: 'originalUrl',
+      label: '원문 URL',
+      width: 'minmax(0, 1.5fr)',
+      render: (item) => {
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        const url = item.originalUrl?.trim();
+        if (!url) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        return (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={url}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              fontSize: '12px',
+              color: '#2563eb',
+              textDecoration: 'none',
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {truncateUrl(url, 32)}
+          </a>
         );
       },
     },
     {
       key: 'category',
       label: '카테고리',
-      width: '10%',
+      width: 'minmax(0, 0.6fr)',
       render: (item) => (
-        <span style={{ color: colors.primaryText, fontSize: '12px' }}>{item.category}</span>
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+          {(item as RowItem).isLoadingRow ? '-' : item.category}
+        </span>
       ),
     },
     {
       key: 'status',
       label: '상태',
-      width: '12%',
+      width: 'minmax(0, 0.7fr)',
       render: (item) => {
-        const isDraftOnly = item.status === DocumentState.DRAFT && item.hasVersions === false;
-        if (isDraftOnly) {
-          return (
-            <span
-              style={{
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        if (!item.isCopyRow) {
+          const isDraftOnly = item.status === DocumentState.DRAFT && item.hasVersions === false;
+          if (isDraftOnly) {
+            return (
+              <span style={{
                 display: 'inline-block',
                 padding: '4px 8px',
                 borderRadius: '4px',
@@ -523,9 +687,25 @@ const response = await documentApi.getAllDocuments(params);
                 fontWeight: 500,
                 backgroundColor: '#FFE5B4',
                 color: '#8B4513',
-              }}
-            >
-              임시저장
+              }}>
+                임시저장
+              </span>
+            );
+          }
+          return <StatusBadge status={item.status} />;
+        }
+        if ((item as RowItem).hasHandoverRequest) {
+          return (
+            <span style={{
+              display: 'inline-block',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: 500,
+              backgroundColor: '#E8F0E8',
+              color: '#2E7D32',
+            }}>
+              인계 요청
             </span>
           );
         }
@@ -535,58 +715,88 @@ const response = await documentApi.getAllDocuments(params);
     {
       key: 'lastModified',
       label: '마지막 수정',
-      width: '12%',
+      width: 'minmax(0, 0.85fr)',
       align: 'right',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
-          {item.lastModified || '-'}
+          {(item as RowItem).isLoadingRow ? '-' : (item.lastModified || '-')}
         </span>
       ),
     },
     {
       key: 'assignedManager',
       label: '담당 관리자',
-      width: '12%',
+      width: 'minmax(0, 0.7fr)',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
-          {item.assignedManager || '-'}
+          {(item as RowItem).isLoadingRow ? '-' : (item.assignedManager || '-')}
         </span>
       ),
     },
     {
       key: 'lockStatus',
       label: '작업자',
-      width: '10%',
+      width: 'minmax(0, 0.6fr)',
       render: (item) => {
-        const lockStatus = lockStatuses.get(item.id);
-        if (!lockStatus?.locked) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
-        const isOld = isLockOld(lockStatus.lockedAt);
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        if (!item.isCopyRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ color: isOld ? '#dc3545' : colors.primaryText, fontSize: '12px', fontWeight: isOld ? 600 : 400 }}>
-              {lockStatus.lockedBy || '알 수 없음'}
-            </span>
-            {isOld && (
-              <span style={{ color: '#dc3545', fontSize: '11px' }}>24시간 이상 편집 중</span>
-            )}
-          </div>
+          <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+            {item.currentWorker || '-'}
+          </span>
         );
       },
     },
     {
-      key: 'action',
-      label: '액션',
-      width: '12%',
+      key: 'currentVersion',
+      label: '현재 버전',
+      width: 'minmax(0, 0.5fr)',
+      align: 'right',
+      render: (item) => {
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        if (!item.isCopyRow) return <span style={{ color: colors.primaryText, fontSize: '12px' }}>v1</span>;
+        return (
+          <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+            {item.isFinal ? 'FINAL' : (item.currentVersionNumber != null ? `v${item.currentVersionNumber}` : '-')}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'estimatedLength',
+      label: '예상 분량',
+      width: 'minmax(0, 0.65fr)',
       align: 'right',
       render: (item) => (
-          <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+          {(item as RowItem).isLoadingRow ? '-' : (item.estimatedLength ? `${item.estimatedLength.toLocaleString()}자` : '-')}
+        </span>
+      ),
+    },
+    {
+      key: 'action',
+      label: '액션',
+      width: '260px',
+      align: 'right',
+      render: (item) => {
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        return (
+          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
             <Button
               variant="secondary"
               onClick={(e) => {
-                if (e) {
-                  e.stopPropagation();
-                }
-                handleManage(item);
+                e?.stopPropagation();
+                navigate(`/documents/${item.id}`);
+              }}
+              style={{ fontSize: '12px', padding: '6px 12px' }}
+            >
+              상세보기
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={(e) => {
+                e?.stopPropagation();
+                handleManage(item as DocumentListItem);
               }}
               style={{ fontSize: '12px', padding: '6px 12px' }}
             >
@@ -595,18 +805,16 @@ const response = await documentApi.getAllDocuments(params);
             <Button
               variant="secondary"
               onClick={(e) => {
-                if (e) {
-                  e.stopPropagation();
-                }
-                handleExport(item);
+                e?.stopPropagation();
+                handleExport(item as DocumentListItem);
               }}
               style={{ fontSize: '12px', padding: '6px 12px' }}
-              title="문서 내보내기"
             >
               내보내기
             </Button>
           </div>
-        ),
+        );
+      },
     },
   ];
 
@@ -882,10 +1090,32 @@ const response = await documentApi.getAllDocuments(params);
         ) : (
           <Table
             columns={columns}
-            data={filteredAndSortedDocuments}
+            data={tableData}
             onRowClick={(item) => {
-              // 행 클릭 시 문서 상세 화면으로 이동
-              navigate(`/documents/${item.id}`);
+              if ((item as RowItem).isLoadingRow) return;
+              if (item.isCopyRow) {
+                navigate(`/documents/${item.id}`);
+              } else {
+                toggleSourceExpand(item.id);
+              }
+            }}
+            getRowStyle={(item) => {
+              const row = item as RowItem;
+              if (row.isLoadingRow) {
+                return { backgroundColor: '#E8E8E8', borderLeft: '4px solid #B0B0B0' };
+              }
+              if (row.isCopyRow) {
+                return { backgroundColor: '#E0E0E0', borderLeft: '4px solid #909090' };
+              }
+              if (expandedSourceIds.has(row.id)) {
+                return { backgroundColor: '#F0F0F0', borderLeft: '3px solid #707070' };
+              }
+              return {};
+            }}
+            getRowHoverStyle={(item) => {
+              const row = item as RowItem;
+              if (row.isCopyRow || row.isLoadingRow) return { backgroundColor: '#C8C8C8' };
+              return undefined;
             }}
             emptyMessage="문서가 없습니다."
           />
@@ -975,20 +1205,8 @@ const response = await documentApi.getAllDocuments(params);
                 <Button variant="secondary" onClick={() => { setManageModalOpen(false); setSelectedDocument(null); }}>
                   닫기
                 </Button>
-                {isAdmin && (() => {
-                  const lockStatus = lockStatuses.get(selectedDocument.id);
-                  const isLocked = lockStatus?.locked;
-                  return (
+                {isAdmin && (
                     <>
-                      {isLocked && (
-                        <Button
-                          variant={isLockOld(lockStatus?.lockedAt) ? 'danger' : 'secondary'}
-                          onClick={handleManageLockRelease}
-                          style={{ fontSize: '13px', padding: '8px 16px' }}
-                        >
-                          편집 권한 회수
-                        </Button>
-                      )}
                       <Button
                         variant="danger"
                         onClick={handleManageDelete}
@@ -997,36 +1215,12 @@ const response = await documentApi.getAllDocuments(params);
                         삭제
                       </Button>
                     </>
-                  );
-                })()}
+                  )}
               </div>
             </div>
           </div>
         )}
 
-        {/* 편집 권한 회수 확인 모달 */}
-        <Modal
-          isOpen={lockReleaseModalOpen}
-          onClose={() => {
-            setLockReleaseModalOpen(false);
-            setSelectedDocument(null);
-          }}
-          title="편집 권한 회수"
-          onConfirm={handleLockReleaseConfirm}
-          confirmText="회수"
-          cancelText="취소"
-          variant="danger"
-        >
-          <p>
-            "{selectedDocument?.title}" 문서의 편집 권한을 회수하시겠습니까?
-            {selectedDocument && lockStatuses.get(selectedDocument.id)?.lockedBy && (
-              <>
-                <br />
-                현재 작업자: {lockStatuses.get(selectedDocument.id)?.lockedBy}
-              </>
-            )}
-          </p>
-        </Modal>
       </div>
     </div>
   );

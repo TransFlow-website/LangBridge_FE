@@ -5,11 +5,9 @@ import { DocumentState } from '../types/translation';
 import { colors } from '../constants/designTokens';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
-import { documentApi, DocumentResponse } from '../services/documentApi';
+import { documentApi } from '../services/documentApi';
 import { categoryApi } from '../services/categoryApi';
-import { translationWorkApi } from '../services/translationWorkApi';
 import { formatLastModifiedDate, formatLastModifiedDateDisplay } from '../utils/dateUtils';
-import { StatusBadge } from '../components/StatusBadge';
 
 /** 인계 정보를 포함한 문서 아이템 */
 interface HandoverDocumentItem {
@@ -33,9 +31,9 @@ export default function TranslationsHandover() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 번역 대기로 전환 확인 모달
-  const [convertModalDoc, setConvertModalDoc] = useState<HandoverDocumentItem | null>(null);
-  const [converting, setConverting] = useState(false);
+  /** 이어받기 시 인계 메모 확인 모달 (메모 확인 후 이어받기 실행) */
+  const [handoverMemoModalDoc, setHandoverMemoModalDoc] = useState<HandoverDocumentItem | null>(null);
+  const [continueLoading, setContinueLoading] = useState(false);
 
   useEffect(() => {
     const fetchHandoverDocuments = async () => {
@@ -51,43 +49,30 @@ export default function TranslationsHandover() {
         const categoryMap = new Map<number, string>();
         categoryList.forEach((cat) => categoryMap.set(cat.id, cat.name));
 
-        // 1단계: latestHandover가 있는 문서만 추출 (번역 대기로 전환된 문서 제외)
         const docsWithHandover = allDocs.filter(
           (doc) => !!doc.latestHandover && doc.status !== 'PENDING_TRANSLATION'
         );
 
-        // 2단계: 현재 누군가 락(편집 중)인 문서는 제외 — 락 없는 문서만 인계 대기 목록에 표시
-        const handoverDocItems: HandoverDocumentItem[] = [];
-        await Promise.all(
-          docsWithHandover.map(async (doc) => {
-            try {
-              const lockStatus = await translationWorkApi.getLockStatus(doc.id);
-              // 락이 있으면(누군가 편집 중이면) 인계 요청 목록에서 제외
-              if (lockStatus?.locked) return;
-            } catch {
-              // 락 조회 실패(404 = 락 없음 포함)는 락 없음으로 간주하여 포함
-            }
-            const h = doc.latestHandover!;
-            handoverDocItems.push({
-              id: doc.id,
-              title: doc.title,
-              category: doc.categoryId
-                ? (categoryMap.get(doc.categoryId) || `카테고리 ${doc.categoryId}`)
-                : '미분류',
-              categoryId: doc.categoryId,
-              status: doc.status as DocumentState,
-              lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
-              handoverMemo: h.memo,
-              handoverTerms: h.terms,
-              handoverAt: h.handedOverAt,
-              handoverByName: h.handedOverBy?.name,
-              completedParagraphCount: h.completedParagraphs?.length ?? 0,
-              estimatedLength: doc.estimatedLength,
-            });
-          })
-        );
+        const handoverDocItems: HandoverDocumentItem[] = docsWithHandover.map((doc) => {
+          const h = doc.latestHandover!;
+          return {
+            id: doc.id,
+            title: doc.title,
+            category: doc.categoryId
+              ? (categoryMap.get(doc.categoryId) || `카테고리 ${doc.categoryId}`)
+              : '미분류',
+            categoryId: doc.categoryId,
+            status: doc.status as DocumentState,
+            lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
+            handoverMemo: h.memo,
+            handoverTerms: h.terms,
+            handoverAt: h.handedOverAt,
+            handoverByName: h.handedOverBy?.name,
+            completedParagraphCount: h.completedParagraphs?.length ?? 0,
+            estimatedLength: doc.estimatedLength,
+          };
+        });
 
-        // 가장 최근 인계순 정렬
         handoverDocItems.sort((a, b) => b.handoverAt.localeCompare(a.handoverAt));
         setDocuments(handoverDocItems);
       } catch (err) {
@@ -101,40 +86,19 @@ export default function TranslationsHandover() {
     fetchHandoverDocuments();
   }, []);
 
-  const handleConvertToPending = async () => {
-    if (!convertModalDoc) return;
+  const handleContinueWithMemoConfirm = async () => {
+    if (!handoverMemoModalDoc) return;
     try {
-      setConverting(true);
-
-      // 1. 현재 번역 내용(MANUAL_TRANSLATION 또는 AI_DRAFT)으로 새 버전 생성 → 버전 번호 자동 증가
-      try {
-        const versions = await documentApi.getDocumentVersions(convertModalDoc.id);
-        const latestTranslation =
-          versions
-            .filter((v) => v.versionType === 'MANUAL_TRANSLATION' || v.versionType === 'AI_DRAFT')
-            .sort((a, b) => b.versionNumber - a.versionNumber)[0];
-        if (latestTranslation?.content) {
-          await documentApi.createDocumentVersion(convertModalDoc.id, {
-            versionType: 'MANUAL_TRANSLATION',
-            content: latestTranslation.content,
-          });
-        }
-      } catch (versionErr) {
-        console.warn('버전 생성 실패 (상태 전환은 계속 진행):', versionErr);
-      }
-
-      // 2. 상태를 번역 대기로 변경 (latestHandover는 서버에서 유지)
-      await documentApi.updateDocumentStatus(convertModalDoc.id, 'PENDING_TRANSLATION');
-
-      // 3. 목록에서 해당 문서 제거 (번역 대기로 전환됐으므로 더 이상 인계 대기 목록에 불필요)
-      setDocuments((prev) => prev.filter((d) => d.id !== convertModalDoc.id));
-      setConvertModalDoc(null);
-      alert(`"${convertModalDoc.title}" 문서를 번역 대기 상태로 전환했습니다.\n다음 번역자가 작업 시작 시 인계 메모를 확인할 수 있습니다.`);
-    } catch (err) {
-      console.error('번역 대기 전환 실패:', err);
-      alert('번역 대기로 전환하는데 실패했습니다.');
+      setContinueLoading(true);
+      const newDoc = await documentApi.copyForContinuation(handoverMemoModalDoc.id);
+      setDocuments((prev) => prev.filter((d) => d.id !== handoverMemoModalDoc.id));
+      setHandoverMemoModalDoc(null);
+      navigate(`/translations/${newDoc.id}/work`, { state: { from: '/documents/handovers' } });
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || '이어받기에 실패했습니다.';
+      alert(msg);
     } finally {
-      setConverting(false);
+      setContinueLoading(false);
     }
   };
 
@@ -151,7 +115,19 @@ export default function TranslationsHandover() {
       key: 'status',
       label: '상태',
       width: '9%',
-      render: (item) => <StatusBadge status={item.status} />,
+      render: () => (
+        <span style={{
+          display: 'inline-block',
+          padding: '2px 8px',
+          borderRadius: '4px',
+          fontSize: '11px',
+          fontWeight: 500,
+          backgroundColor: '#E8F0E8',
+          color: '#2E7D32',
+        }}>
+          인계 요청
+        </span>
+      ),
     },
     {
       key: 'category',
@@ -207,40 +183,30 @@ export default function TranslationsHandover() {
       label: '액션',
       width: '17%',
       align: 'right',
-      render: (item) => {
-        const alreadyPending = item.status === 'PENDING_TRANSLATION';
-        return (
-          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-            <Button
-              variant="secondary"
-              onClick={(e) => {
-                if (e) e.stopPropagation();
-                navigate(`/documents/${item.id}?from=handover`);
-              }}
-              style={{ fontSize: '12px', padding: '6px 12px' }}
-            >
-              상세보기
-            </Button>
-            {!alreadyPending && (
-              <Button
-                variant="primary"
-                onClick={(e) => {
-                  if (e) e.stopPropagation();
-                  setConvertModalDoc(item);
-                }}
-                style={{ fontSize: '12px', padding: '6px 12px' }}
-              >
-                번역 대기로 전환
-              </Button>
-            )}
-            {alreadyPending && (
-              <span style={{ fontSize: '12px', color: '#28A745', fontWeight: 600, alignSelf: 'center' }}>
-                전환 완료
-              </span>
-            )}
-          </div>
-        );
-      },
+      render: (item) => (
+        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+          <Button
+            variant="secondary"
+            onClick={(e) => {
+              if (e) e.stopPropagation();
+              navigate(`/documents/${item.id}?from=handover`);
+            }}
+            style={{ fontSize: '12px', padding: '6px 12px' }}
+          >
+            상세보기
+          </Button>
+          <Button
+            variant="primary"
+            onClick={(e) => {
+              if (e) e.stopPropagation();
+              setHandoverMemoModalDoc(item);
+            }}
+            style={{ fontSize: '12px', padding: '6px 12px' }}
+          >
+            이어받기
+          </Button>
+        </div>
+      ),
     },
   ];
 
@@ -258,7 +224,7 @@ export default function TranslationsHandover() {
           backgroundColor: '#F8F9FA',
           borderRadius: '4px',
         }}>
-          번역 작업 중 인계 요청을 남긴 문서 목록입니다. 인계 사유를 확인하고 다른 번역자가 이어서 작업할 수 있도록 번역 대기 상태로 전환할 수 있습니다.
+          번역 작업 중 인계 요청을 남긴 문서 목록입니다. 인계 메모를 확인한 뒤 이어받기를 하면 해당 문서를 이어서 번역할 수 있습니다.
         </div>
 
         {loading ? (
@@ -282,23 +248,46 @@ export default function TranslationsHandover() {
         )}
       </div>
 
-      {/* 번역 대기 전환 확인 모달 */}
+      {/* 인계 메모 확인 후 이어받기 모달 */}
       <Modal
-        isOpen={!!convertModalDoc}
-        onClose={() => setConvertModalDoc(null)}
-        title="번역 대기로 전환"
-        onConfirm={handleConvertToPending}
-        confirmText={converting ? '전환 중...' : '전환'}
+        isOpen={!!handoverMemoModalDoc}
+        onClose={() => !continueLoading && setHandoverMemoModalDoc(null)}
+        title="인계 메모 확인"
+        onConfirm={handleContinueWithMemoConfirm}
+        confirmText={continueLoading ? '처리 중...' : '확인하고 이어받기'}
         cancelText="취소"
         variant="primary"
       >
-        <p style={{ marginBottom: '12px' }}>
-          <strong>"{convertModalDoc?.title}"</strong> 문서를 번역 대기 상태로 전환하시겠습니까?
-        </p>
-        <p style={{ fontSize: '13px', color: colors.secondaryText }}>
-          전환 후 번역 대기 문서 목록에 나타나며, 다른 번역자가 작업을 이어받을 수 있습니다.
-          인계 메모는 다음 번역자가 작업을 시작할 때 자동으로 표시됩니다.
-        </p>
+        {handoverMemoModalDoc && (
+          <div style={{ fontSize: '13px' }}>
+            <p style={{ marginBottom: '12px', fontWeight: 600 }}>"{handoverMemoModalDoc.title}"</p>
+            <div style={{ marginBottom: '12px' }}>
+              <span style={{ color: colors.secondaryText, display: 'block', marginBottom: '4px' }}>인계자</span>
+              <span>{handoverMemoModalDoc.handoverByName || '-'}</span>
+            </div>
+            <div style={{ marginBottom: '12px' }}>
+              <span style={{ color: colors.secondaryText, display: 'block', marginBottom: '4px' }}>인계 시각</span>
+              <span>{formatLastModifiedDateDisplay(handoverMemoModalDoc.handoverAt)}</span>
+            </div>
+            <div style={{ marginBottom: '12px' }}>
+              <span style={{ color: colors.secondaryText, display: 'block', marginBottom: '4px' }}>인계 메모</span>
+              <div style={{ padding: '10px', backgroundColor: '#F5F5F5', borderRadius: '6px', whiteSpace: 'pre-wrap' }}>
+                {handoverMemoModalDoc.handoverMemo || '-'}
+              </div>
+            </div>
+            {handoverMemoModalDoc.handoverTerms && (
+              <div style={{ marginBottom: '12px' }}>
+                <span style={{ color: colors.secondaryText, display: 'block', marginBottom: '4px' }}>주의 용어/표현</span>
+                <div style={{ padding: '10px', backgroundColor: '#F5F5F5', borderRadius: '6px', whiteSpace: 'pre-wrap' }}>
+                  {handoverMemoModalDoc.handoverTerms}
+                </div>
+              </div>
+            )}
+            <p style={{ fontSize: '12px', color: colors.secondaryText, marginTop: '12px' }}>
+              확인 후 이어받기를 누르면 이 문서를 기반으로 새 복사본이 생성되고 작업 화면으로 이동합니다.
+            </p>
+          </div>
+        )}
       </Modal>
     </div>
   );

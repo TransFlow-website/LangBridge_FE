@@ -25,23 +25,30 @@ export interface CompleteTranslationRequest {
 
 export const translationWorkApi = {
   /**
-   * 문서 락 획득
+   * 번역 시작: 원문에서 복사본 생성 후 해당 문서 ID 반환 (락 없음)
    */
-  acquireLock: async (documentId: number): Promise<LockStatusResponse> => {
-    const response = await apiClient.post<LockStatusResponse>(
-      `/documents/${documentId}/lock`
+  startTranslation: async (sourceDocumentId: number): Promise<{ id: number }> => {
+    const response = await apiClient.post<{ id: number }>(
+      `/documents/${sourceDocumentId}/start-translation`
     );
     return response.data;
   },
 
   /**
-   * 락 상태 확인
+   * @deprecated 락 제거됨. 문서 조회 시 document.completedParagraphs 사용. 404 시 스텁 반환.
    */
   getLockStatus: async (documentId: number): Promise<LockStatusResponse> => {
-    const response = await apiClient.get<LockStatusResponse>(
-      `/documents/${documentId}/lock-status`
-    );
-    return response.data;
+    try {
+      const response = await apiClient.get<LockStatusResponse>(
+        `/documents/${documentId}/lock-status`
+      );
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404 || err?.response?.status === 405) {
+        return { locked: false, canEdit: true, completedParagraphs: [] };
+      }
+      throw err;
+    }
   },
 
   /**

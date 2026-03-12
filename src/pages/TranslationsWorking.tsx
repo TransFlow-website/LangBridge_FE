@@ -78,9 +78,9 @@ const convertToDocumentListItem = (
     status: doc.status as DocumentState,
     lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
     assignedManager: doc.lastModifiedBy?.name,
-    isFinal: false,
+    isFinal: !!(doc as DocumentResponse).currentVersionIsFinal,
     originalUrl: doc.originalUrl,
-    currentWorker: lockStatus?.lockedBy?.name,
+    currentWorker: doc.createdBy?.name ?? lockStatus?.lockedBy?.name,
     currentVersionNumber: currentVersionNumber ?? undefined,
     isMyLock: true,
   };
@@ -120,28 +120,14 @@ export default function TranslationsWorking() {
         categoryList.forEach((cat) => map.set(cat.id, cat.name));
 
         const inTranslationDocs = allDocuments.filter((doc) => doc.status === 'IN_TRANSLATION');
-
-        const myWorkingWithLock: { doc: DocumentResponse; lockStatus: LockStatusResponse }[] = [];
-        for (const doc of inTranslationDocs) {
-          try {
-            const lockStatus = await translationWorkApi.getLockStatus(doc.id);
-            if (!lockStatus) continue;
-            const lockedById = lockStatus.lockedBy?.id;
-            const myId = user.id;
-            const isMyLock =
-              lockStatus.locked &&
-              lockStatus.canEdit &&
-              lockedById !== undefined &&
-              myId !== undefined &&
-              Number(lockedById) === Number(myId);
-            if (isMyLock) {
-              myWorkingWithLock.push({ doc, lockStatus });
-            }
-          } catch (_) {}
-        }
+        const myId = user?.id;
+        // 락 제거됨: 복사본의 createdBy가 나인 문서만 "내 작업"
+        const myWorkingDocs = myId != null
+          ? inTranslationDocs.filter((doc) => Number(doc.createdBy?.id) === Number(myId))
+          : [];
 
         const docsWithVersion = await Promise.all(
-          myWorkingWithLock.map(async ({ doc, lockStatus }) => {
+          myWorkingDocs.map(async (doc) => {
             let originalVersion: DocumentVersionResponse | null = null;
             let currentVersionNumber: number | null = null;
             try {
@@ -152,6 +138,7 @@ export default function TranslationsWorking() {
                 currentVersionNumber = currentVer?.versionNumber ?? null;
               }
             } catch (_) {}
+            const lockStatus: LockStatusResponse = { locked: false, canEdit: true, completedParagraphs: doc.completedParagraphs ?? [] };
             return { doc, lockStatus, originalVersion, currentVersionNumber };
           })
         );
@@ -227,33 +214,55 @@ export default function TranslationsWorking() {
     return statusMap[status] || status;
   };
 
+  const truncateUrl = (url: string, maxLen: number = 42) => {
+    if (!url || !url.trim()) return '';
+    const u = url.trim();
+    return u.length <= maxLen ? u : u.slice(0, maxLen) + '…';
+  };
+
   const columns: TableColumn<DocumentListItem>[] = [
     {
       key: 'title',
       label: '문서 제목',
-      width: '25%',
+      width: 'minmax(0, 2fr)',
       render: (item) => (
-        <span style={{ fontWeight: 500, color: '#000000' }}>{item.title}</span>
+        <span style={{ fontWeight: 500, color: '#000000', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }} title={item.title}>
+          {item.title}
+        </span>
       ),
+    },
+    {
+      key: 'originalUrl',
+      label: '원문 URL',
+      width: 'minmax(0, 1.5fr)',
+      render: (item) => {
+        const url = item.originalUrl?.trim();
+        if (!url) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        return (
+          <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }} title={url}>
+            {truncateUrl(url, 32)}
+          </a>
+        );
+      },
     },
     {
       key: 'status',
       label: '상태',
-      width: '10%',
+      width: 'minmax(0, 0.8fr)',
       render: (item) => <StatusBadge status={item.status} />,
     },
     {
       key: 'category',
       label: '카테고리',
-      width: '8%',
+      width: 'minmax(0, 0.7fr)',
       render: (item) => (
-        <span style={{ color: colors.primaryText, fontSize: '12px' }}>{item.category}</span>
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>{item.category ?? '-'}</span>
       ),
     },
     {
       key: 'lastModified',
       label: '최근 수정',
-      width: '10%',
+      width: 'minmax(0, 0.9fr)',
       align: 'right',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
@@ -264,7 +273,7 @@ export default function TranslationsWorking() {
     {
       key: 'currentWorker',
       label: '작업자',
-      width: '10%',
+      width: 'minmax(0, 0.7fr)',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
           {item.currentWorker || '-'}
@@ -274,18 +283,18 @@ export default function TranslationsWorking() {
     {
       key: 'currentVersion',
       label: '현재 버전',
-      width: '8%',
+      width: 'minmax(0, 0.5fr)',
       align: 'right',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
-          {item.currentVersionNumber ? `v${item.currentVersionNumber}` : '-'}
+          {item.isFinal ? 'FINAL' : (item.currentVersionNumber != null ? `v${item.currentVersionNumber}` : '-')}
         </span>
       ),
     },
     {
       key: 'estimatedLength',
       label: '예상 분량',
-      width: '10%',
+      width: 'minmax(0, 0.7fr)',
       align: 'right',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
@@ -296,10 +305,10 @@ export default function TranslationsWorking() {
     {
       key: 'action',
       label: '액션',
-      width: '20%',
+      width: '260px',
       align: 'right',
       render: (item) => (
-        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
           <Button
             variant="secondary"
             onClick={(e) => {

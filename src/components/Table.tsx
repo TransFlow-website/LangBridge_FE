@@ -14,6 +14,10 @@ interface TableProps<T> {
   data: T[];
   onRowClick?: (item: T, index: number) => void;
   emptyMessage?: string;
+  /** 행별 스타일 (예: 원본/복사본 배경 구분) */
+  getRowStyle?: (item: T, index: number) => React.CSSProperties;
+  /** 행별 호버 시 배경색 (미지정 시 #F5F5F5) - 토글된 행 등 구분용 */
+  getRowHoverStyle?: (item: T, index: number) => React.CSSProperties | undefined;
 }
 
 export function Table<T extends { id: number | string }>({
@@ -21,6 +25,8 @@ export function Table<T extends { id: number | string }>({
   data,
   onRowClick,
   emptyMessage = '데이터가 없습니다.',
+  getRowStyle,
+  getRowHoverStyle,
 }: TableProps<T>) {
   return (
     <div
@@ -90,14 +96,17 @@ export function Table<T extends { id: number | string }>({
                 backgroundColor: colors.surface,
                 gap: '8px',
                 alignItems: 'center',
+                ...getRowStyle?.(item, index),
               }}
               onMouseEnter={(e) => {
                 if (onRowClick) {
-                  e.currentTarget.style.backgroundColor = '#F5F5F5';
+                  const hoverBg = getRowHoverStyle?.(item, index)?.backgroundColor;
+                  e.currentTarget.style.backgroundColor = (typeof hoverBg === 'string' ? hoverBg : '#F5F5F5');
                 }
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = colors.surface;
+                const base = getRowStyle?.(item, index)?.backgroundColor;
+                e.currentTarget.style.backgroundColor = (typeof base === 'string' ? base : colors.surface);
               }}
             >
               {columns.map((col) => (
@@ -107,6 +116,8 @@ export function Table<T extends { id: number | string }>({
                     textAlign: col.align || 'left',
                     display: 'flex',
                     alignItems: 'center',
+                    minWidth: 0,
+                    overflow: 'hidden',
                   }}
                 >
                   {col.render(item, index)}

@@ -135,99 +135,12 @@ export default function TranslationWork() {
         console.log('✅ 문서 조회 성공:', doc);
         setDocument(doc);
 
-        // 2. 락 획득 시도 (재시도 로직 포함)
-        console.log('🔒 락 획득 시도:', documentId);
-        let lockAttempts = 0;
-        const maxLockAttempts = 3;
-        let lockAcquired = false;
-        
-        while (!lockAcquired && lockAttempts < maxLockAttempts) {
-          try {
-            lockAttempts++;
-            console.log(`🔒 락 획득 시도 ${lockAttempts}/${maxLockAttempts}:`, documentId);
-            
-            const lock = await translationWorkApi.acquireLock(documentId);
-            console.log('✅ 락 획득 성공:', lock);
-            setLockStatus(lock);
-            
-            // completedParagraphs 초기화
-            if (lock.completedParagraphs && lock.completedParagraphs.length > 0) {
-              console.log('📊 기존 완료된 문단 로드:', lock.completedParagraphs);
-              setCompletedParagraphs(new Set(lock.completedParagraphs));
-            }
-            
-            if (!lock.canEdit) {
-              setError(`이 문서는 ${lock.lockedBy?.name}님이 작업 중입니다.`);
-              setLoading(false);
-              return;
-            }
-            
-            lockAcquired = true;
-            break;
-            
-          } catch (lockError: any) {
-            const status = lockError?.response?.status;
-            
-            // 503 (SERVICE_UNAVAILABLE) 또는 데이터베이스 락 오류인 경우 재시도
-            if ((status === 503 || lockError.message?.includes('LockAcquisitionException')) && 
-                lockAttempts < maxLockAttempts) {
-              console.warn(`⚠️ 락 획득 실패 (${lockAttempts}/${maxLockAttempts}), 재시도 중...`);
-              await new Promise(resolve => setTimeout(resolve, 1000 * lockAttempts)); // 점진적 대기
-              continue;
-            }
-            
-            // 재시도 불가능한 에러 또는 최대 시도 횟수 초과
-            throw lockError;
-          }
+        // 2. 완료된 문단은 문서에서 로드 (락 제거됨)
+        if (doc.completedParagraphs && doc.completedParagraphs.length > 0) {
+          console.log('📊 기존 완료된 문단 로드:', doc.completedParagraphs);
+          setCompletedParagraphs(new Set(doc.completedParagraphs));
         }
-        
-        if (!lockAcquired) {
-          console.error('❌ 락 획득 최종 실패:', documentId);
-          setError('문서 락을 획득할 수 없습니다. 잠시 후 다시 시도해주세요.');
-          setLoading(false);
-          return;
-        }
-        
-        try {
-        } catch (lockError: any) {
-          console.error('❌ 락 획득 최종 실패:', lockError);
-          console.error('락 에러 상세:', {
-            response: lockError.response,
-            data: lockError.response?.data,
-            status: lockError.response?.status,
-            message: lockError.message,
-          });
-          
-          const status = lockError.response?.status;
-          
-          if (status === 409) {
-            // 이미 락이 있는 경우 상태만 확인
-            try {
-              const status = await translationWorkApi.getLockStatus(documentId);
-              setLockStatus(status);
-              
-              // completedParagraphs 초기화
-              if (status.completedParagraphs && status.completedParagraphs.length > 0) {
-                console.log('📊 기존 완료된 문단 로드 (409):', status.completedParagraphs);
-                setCompletedParagraphs(new Set(status.completedParagraphs));
-              }
-              
-              if (!status.canEdit) {
-                setError(`이 문서는 ${status.lockedBy?.name || '다른 사용자'}님이 작업 중입니다.`);
-                setLoading(false);
-                return;
-              }
-            } catch (statusError: any) {
-              console.error('락 상태 확인 실패:', statusError);
-              setError('문서 락 상태를 확인할 수 없습니다.');
-              setLoading(false);
-              return;
-            }
-          } else {
-            // 다른 에러는 상위 catch로 전달
-            throw lockError;
-          }
-        }
+        setLockStatus(null);
 
         // 3. 버전 정보 가져오기
         try {
@@ -1080,25 +993,6 @@ export default function TranslationWork() {
     };
   }, [editorMode, isTranslationEditorInitialized, savedTranslationHtml]); // ⭐ savedTranslationHtml 추가하여 undo/redo 후 자동 재활성화
 
-  // 자동 저장 (디바운스)
-  useEffect(() => {
-    if (!documentId || !savedTranslationHtml) return;
-
-    const timeoutId = setTimeout(async () => {
-      try {
-        await translationWorkApi.saveTranslation(documentId, {
-          content: savedTranslationHtml,
-          completedParagraphs: Array.from(completedParagraphs),
-        });
-        console.log('💾 자동 저장 완료');
-      } catch (error) {
-        console.error('자동 저장 실패:', error);
-      }
-    }, 2000); // 2초 후 저장
-
-    return () => clearTimeout(timeoutId);
-  }, [savedTranslationHtml, documentId, completedParagraphs]);
-
   // 더보기 메뉴 외부 클릭 시 닫기
   useEffect(() => {
     if (!showMoreMenu) return;
@@ -1470,20 +1364,28 @@ export default function TranslationWork() {
 
     try {
       setHandoverSubmitting(true);
-      // 1. 현 지점으로 먼저 저장
-      await translationWorkApi.saveTranslation(documentId, {
-        content: savedTranslationHtml,
-        completedParagraphs: Array.from(completedParagraphs),
-      });
-      // 2. 인계 요청
-      await translationWorkApi.handover(documentId, {
-        memo: handoverMemo.trim(),
-        terms: handoverTerms.trim() || undefined,
-      });
+      try {
+        await translationWorkApi.saveTranslation(documentId, {
+          content: savedTranslationHtml,
+          completedParagraphs: Array.from(completedParagraphs),
+        });
+      } catch (saveErr: any) {
+        const msg = (saveErr as any).response?.data?.message ?? (saveErr as any).message ?? (saveErr as any).response?.statusText ?? '서버 오류';
+        alert('저장 실패: ' + msg);
+        return;
+      }
+      try {
+        await translationWorkApi.handover(documentId, {
+          memo: handoverMemo.trim(),
+          terms: handoverTerms.trim() || undefined,
+        });
+      } catch (handoverErr: any) {
+        const msg = (handoverErr as any).response?.data?.message ?? (handoverErr as any).message ?? (handoverErr as any).response?.statusText ?? '서버 오류';
+        alert('인계 요청 실패: ' + msg);
+        return;
+      }
       alert('인계가 완료되었습니다.');
       navigate(fromPath);
-    } catch (error: any) {
-      alert('인계 실패: ' + (error.response?.data?.message || error.message));
     } finally {
       setHandoverSubmitting(false);
     }
@@ -1591,14 +1493,11 @@ export default function TranslationWork() {
           <Button 
             variant="secondary" 
             onClick={() => {
-              // 저장되지 않은 변경사항이 있는지 확인
               const hasUnsavedChanges = savedTranslationHtml !== lastSavedHtml;
-              
               if (hasUnsavedChanges) {
-                const confirmed = window.confirm('⚠️ 저장되지 않은 변경사항이 있습니다. 정말 나가시겠습니까?');
+                const confirmed = window.confirm('저장하지 않으면 변경사항이 사라집니다. 나가시겠습니까?');
                 if (!confirmed) return;
               }
-              
               navigate(fromPath);
             }} 
             style={{ fontSize: '12px', padding: '6px 12px' }}

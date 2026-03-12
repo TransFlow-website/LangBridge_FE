@@ -94,25 +94,12 @@ const Dashboard: React.FC = () => {
           progress: 0,
         }));
 
-        // 2. 내가 작업 중인 문서 (IN_TRANSLATION이면서 현재 사용자가 락을 보유한 문서만)
+        // 2. 내가 작업 중인 문서 (IN_TRANSLATION이면서 createdBy가 나인 복사본만, 락 제거됨)
         const inTranslationDocs = await documentApi.getAllDocuments({ status: 'IN_TRANSLATION' });
-        const myWorkingDocs: DocumentResponse[] = [];
-        if (user?.id) {
-          for (const doc of inTranslationDocs) {
-            try {
-              const lockStatus = await translationWorkApi.getLockStatus(doc.id);
-              if (!lockStatus) continue;
-              const lockedById = lockStatus.lockedBy?.id;
-              const myId = user.id;
-              const isMyLock = lockStatus.locked && lockStatus.canEdit &&
-                lockedById !== undefined && myId !== undefined &&
-                Number(lockedById) === Number(myId);
-              if (isMyLock) myWorkingDocs.push(doc);
-            } catch {
-              // 락 조회 실패 시 해당 문서 제외
-            }
-          }
-        }
+        const myId = user?.id;
+        const myWorkingDocs: DocumentResponse[] = myId != null
+          ? inTranslationDocs.filter((doc) => Number(doc.createdBy?.id) === Number(myId))
+          : [];
         const workingDocuments: Document[] = myWorkingDocs.slice(0, 3).map(doc => ({
           id: doc.id,
           title: doc.title,
