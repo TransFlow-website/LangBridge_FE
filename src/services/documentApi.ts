@@ -23,6 +23,8 @@ export interface DocumentResponse {
   status: string;
   currentVersionId?: number;
   currentVersionNumber?: number;
+  /** 현재 버전이 승인 등으로 최종(FINAL) 처리되었는지 */
+  currentVersionIsFinal?: boolean;
   estimatedLength?: number;
   versionCount?: number;
   hasVersions?: boolean;
@@ -105,6 +107,14 @@ export const documentApi = {
    */
   getCopiesBySourceId: async (sourceDocumentId: number): Promise<DocumentResponse[]> => {
     const response = await apiClient.get<DocumentResponse[]>(`/documents/${sourceDocumentId}/copies`);
+    return response.data;
+  },
+
+  /**
+   * 해당 문서를 바탕으로 이어받기용 복사본 생성 (관리자/중간관리자). 원작업자 문서에는 영향 없음.
+   */
+  copyForContinuation: async (documentId: number): Promise<DocumentResponse> => {
+    const response = await apiClient.post<DocumentResponse>(`/documents/${documentId}/copy-for-continuation`);
     return response.data;
   },
 

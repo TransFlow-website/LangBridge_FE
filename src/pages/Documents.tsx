@@ -59,11 +59,13 @@ const convertToDocumentListItem = (doc: DocumentResponse): DocumentListItem => {
     status: doc.status as DocumentState,
     lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
     assignedManager: doc.lastModifiedBy?.name,
-    isFinal: false,
+    isFinal: doc.currentVersionIsFinal === true,
     originalUrl: doc.originalUrl,
     hasVersions: doc.hasVersions === true,
   };
   if (doc.createdBy?.name) item.currentWorker = doc.createdBy.name;
+  if (doc.currentVersionId != null) item.currentVersionId = doc.currentVersionId;
+  if (doc.currentVersionNumber != null) item.currentVersionNumber = doc.currentVersionNumber;
   return item;
 };
 
@@ -117,7 +119,7 @@ export default function Documents() {
   const [loadingCopySourceIds, setLoadingCopySourceIds] = useState<Set<number>>(new Set());
   const isAdmin = user?.role === UserRole.SUPER_ADMIN || user?.role === UserRole.ADMIN;
 
-  type RowItem = DocumentListItem & { isCopyRow?: boolean; sourceDocumentId?: number; isLoadingRow?: boolean };
+  type RowItem = DocumentListItem & { isCopyRow?: boolean; sourceDocumentId?: number; isLoadingRow?: boolean; rowNumber?: number; hasHandoverRequest?: boolean };
 
   // API에서 문서 목록 가져오기
   useEffect(() => {
@@ -296,6 +298,7 @@ export default function Documents() {
             isCopyRow: true,
             sourceDocumentId: item.id,
             isLoadingRow: true,
+            rowNumber: 1,
           } as RowItem);
         } else if (Array.isArray(copies)) {
           if (copies.length === 0) {
@@ -305,11 +308,12 @@ export default function Documents() {
               isCopyRow: true,
               sourceDocumentId: item.id,
               isLoadingRow: true,
+              rowNumber: 1,
             } as RowItem);
           } else {
-            for (const copy of copies) {
-              rows.push({ ...copy, isCopyRow: true, sourceDocumentId: item.id });
-            }
+            copies.forEach((copy, idx) => {
+              rows.push({ ...copy, isCopyRow: true, sourceDocumentId: item.id, rowNumber: idx + 1 });
+            });
           }
         }
       }
@@ -335,6 +339,10 @@ export default function Documents() {
         const withMeta = copies.map((doc) => {
           const listItem = convertToDocumentListItem(doc);
           if (doc.createdBy?.name) listItem.currentWorker = doc.createdBy.name;
+          (listItem as RowItem).hasHandoverRequest = !!doc.latestHandover;
+          if (doc.currentVersionId != null) listItem.currentVersionId = doc.currentVersionId;
+          if (doc.currentVersionNumber != null) listItem.currentVersionNumber = doc.currentVersionNumber;
+          if (doc.currentVersionIsFinal != null) listItem.isFinal = doc.currentVersionIsFinal;
           return listItem;
         });
         setCopiesBySourceId((prev) => {
@@ -499,6 +507,12 @@ export default function Documents() {
     }
   };
 
+  const truncateUrl = (url: string, maxLen: number = 32) => {
+    if (!url || !url.trim()) return '';
+    const u = url.trim();
+    return u.length <= maxLen ? u : u.slice(0, maxLen) + '…';
+  };
+
   const expandColumn: TableColumn<RowItem> = {
     key: 'expand',
     label: '',
@@ -525,12 +539,25 @@ export default function Documents() {
     },
   };
 
+  const numberColumn: TableColumn<RowItem> = {
+    key: 'rowNumber',
+    label: '№',
+    width: '32px',
+    align: 'center',
+    render: (item) => {
+      const row = item as RowItem;
+      if (row.rowNumber != null) return <span style={{ fontSize: '12px', color: colors.secondaryText, fontWeight: 500 }}>{row.rowNumber}</span>;
+      return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>—</span>;
+    },
+  };
+
   const columns: TableColumn<RowItem>[] = [
+    numberColumn,
     expandColumn,
     {
       key: 'title',
       label: '문서 제목',
-      width: '22%',
+      width: 'minmax(0, 2fr)',
       render: (item) => {
         if ((item as RowItem).isLoadingRow) {
           return <span style={{ paddingLeft: 24, color: colors.secondaryText, fontSize: '12px' }}>{item.title}</span>;
@@ -538,7 +565,16 @@ export default function Documents() {
         const isFavorite = favoriteStatus.get(item.id) || false;
         const isDraftOnly = item.status === DocumentState.DRAFT && item.hasVersions === false;
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: item.isCopyRow ? 24 : 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              paddingLeft: item.isCopyRow ? 24 : 0,
+              minWidth: 0,
+              overflow: 'hidden',
+            }}
+          >
             {!item.isCopyRow && (
               <button
                 onClick={(e) => handleToggleFavorite(item, e)}
@@ -549,6 +585,7 @@ export default function Documents() {
                   padding: '4px',
                   display: 'flex',
                   alignItems: 'center',
+                  flexShrink: 0,
                   fontSize: '18px',
                   color: isFavorite ? '#FFD700' : '#C0C0C0',
                   transition: 'color 0.2s',
@@ -566,24 +603,66 @@ export default function Documents() {
                 fontSize: '10px',
                 borderRadius: '4px',
                 fontWeight: 600,
+                flexShrink: 0,
               }}>
                 임시저장
               </span>
             )}
-            <span style={{ fontWeight: item.isCopyRow ? 400 : 500, color: isDraftOnly && !item.isCopyRow ? '#999' : '#000000', fontStyle: isDraftOnly && !item.isCopyRow ? 'italic' : 'normal' }}>
+            <span
+              style={{
+                fontWeight: item.isCopyRow ? 400 : 500,
+                color: isDraftOnly && !item.isCopyRow ? '#999' : '#000000',
+                fontStyle: isDraftOnly && !item.isCopyRow ? 'italic' : 'normal',
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={item.title}
+            >
               <HighlightText text={item.title} searchTerm={searchTerm} />
             </span>
             {item.isCopyRow && !(item as RowItem).isLoadingRow && (
-              <span style={{ fontSize: '11px', color: colors.secondaryText }}>(복사본)</span>
+              <span style={{ fontSize: '11px', color: colors.secondaryText, flexShrink: 0 }}>(복사본)</span>
             )}
           </div>
         );
       },
     },
     {
+      key: 'originalUrl',
+      label: '원문 URL',
+      width: 'minmax(0, 1.5fr)',
+      render: (item) => {
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        const url = item.originalUrl?.trim();
+        if (!url) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        return (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={url}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              fontSize: '12px',
+              color: '#2563eb',
+              textDecoration: 'none',
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {truncateUrl(url, 32)}
+          </a>
+        );
+      },
+    },
+    {
       key: 'category',
       label: '카테고리',
-      width: '10%',
+      width: 'minmax(0, 0.6fr)',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
           {(item as RowItem).isLoadingRow ? '-' : item.category}
@@ -593,7 +672,7 @@ export default function Documents() {
     {
       key: 'status',
       label: '상태',
-      width: '12%',
+      width: 'minmax(0, 0.7fr)',
       render: (item) => {
         if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
         if (!item.isCopyRow) {
@@ -615,13 +694,28 @@ export default function Documents() {
           }
           return <StatusBadge status={item.status} />;
         }
+        if ((item as RowItem).hasHandoverRequest) {
+          return (
+            <span style={{
+              display: 'inline-block',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: 500,
+              backgroundColor: '#E8F0E8',
+              color: '#2E7D32',
+            }}>
+              인계 요청
+            </span>
+          );
+        }
         return <StatusBadge status={item.status} />;
       },
     },
     {
       key: 'lastModified',
       label: '마지막 수정',
-      width: '12%',
+      width: 'minmax(0, 0.85fr)',
       align: 'right',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
@@ -632,7 +726,7 @@ export default function Documents() {
     {
       key: 'assignedManager',
       label: '담당 관리자',
-      width: '12%',
+      width: 'minmax(0, 0.7fr)',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
           {(item as RowItem).isLoadingRow ? '-' : (item.assignedManager || '-')}
@@ -642,7 +736,7 @@ export default function Documents() {
     {
       key: 'lockStatus',
       label: '작업자',
-      width: '10%',
+      width: 'minmax(0, 0.6fr)',
       render: (item) => {
         if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
         if (!item.isCopyRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
@@ -654,19 +748,55 @@ export default function Documents() {
       },
     },
     {
+      key: 'currentVersion',
+      label: '현재 버전',
+      width: 'minmax(0, 0.5fr)',
+      align: 'right',
+      render: (item) => {
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        if (!item.isCopyRow) return <span style={{ color: colors.primaryText, fontSize: '12px' }}>v1</span>;
+        return (
+          <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+            {item.isFinal ? 'FINAL' : (item.currentVersionNumber != null ? `v${item.currentVersionNumber}` : '-')}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'estimatedLength',
+      label: '예상 분량',
+      width: 'minmax(0, 0.65fr)',
+      align: 'right',
+      render: (item) => (
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+          {(item as RowItem).isLoadingRow ? '-' : (item.estimatedLength ? `${item.estimatedLength.toLocaleString()}자` : '-')}
+        </span>
+      ),
+    },
+    {
       key: 'action',
       label: '액션',
-      width: '12%',
+      width: '260px',
       align: 'right',
       render: (item) => {
         if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
         return (
-          <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
             <Button
               variant="secondary"
               onClick={(e) => {
                 e?.stopPropagation();
-                handleManage(item);
+                navigate(`/documents/${item.id}`);
+              }}
+              style={{ fontSize: '12px', padding: '6px 12px' }}
+            >
+              상세보기
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={(e) => {
+                e?.stopPropagation();
+                handleManage(item as DocumentListItem);
               }}
               style={{ fontSize: '12px', padding: '6px 12px' }}
             >
@@ -676,7 +806,7 @@ export default function Documents() {
               variant="secondary"
               onClick={(e) => {
                 e?.stopPropagation();
-                handleExport(item);
+                handleExport(item as DocumentListItem);
               }}
               style={{ fontSize: '12px', padding: '6px 12px' }}
             >
@@ -968,6 +1098,24 @@ export default function Documents() {
               } else {
                 toggleSourceExpand(item.id);
               }
+            }}
+            getRowStyle={(item) => {
+              const row = item as RowItem;
+              if (row.isLoadingRow) {
+                return { backgroundColor: '#E8E8E8', borderLeft: '4px solid #B0B0B0' };
+              }
+              if (row.isCopyRow) {
+                return { backgroundColor: '#E0E0E0', borderLeft: '4px solid #909090' };
+              }
+              if (expandedSourceIds.has(row.id)) {
+                return { backgroundColor: '#F0F0F0', borderLeft: '3px solid #707070' };
+              }
+              return {};
+            }}
+            getRowHoverStyle={(item) => {
+              const row = item as RowItem;
+              if (row.isCopyRow || row.isLoadingRow) return { backgroundColor: '#C8C8C8' };
+              return undefined;
             }}
             emptyMessage="문서가 없습니다."
           />

@@ -11,6 +11,8 @@ import { categoryApi, CategoryResponse } from '../services/categoryApi';
 import { translationWorkApi, LockStatusResponse } from '../services/translationWorkApi';
 import { formatLastModifiedDate } from '../utils/dateUtils';
 import { StatusBadge } from '../components/StatusBadge';
+import { useUser } from '../contexts/UserContext';
+import { UserRole } from '../types/user';
 
 /** 문서 리스트: 전체 / 진행 중 / 완료 */
 const PENDING_PAGE_STATUSES = [
@@ -137,13 +139,15 @@ const convertToDocumentListItem = (
     status: doc.status as DocumentState,
     lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
     assignedManager: doc.lastModifiedBy?.name,
-    isFinal: false, // 나중에 버전 정보에서 가져오기
+    isFinal: !!(doc as DocumentResponse).currentVersionIsFinal,
     originalUrl: doc.originalUrl,
   };
 };
 
 export default function TranslationsPending() {
   const navigate = useNavigate();
+  const { user } = useUser();
+  const isAdmin = user?.role === UserRole.SUPER_ADMIN || user?.role === UserRole.ADMIN;
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -270,12 +274,9 @@ export default function TranslationsPending() {
           } else if (doc.status === 'IN_TRANSLATION' && doc.createdBy?.name) {
             item.currentWorker = doc.createdBy.name;
           }
-          if (doc.currentVersionId) {
-            item.currentVersionId = doc.currentVersionId;
-          }
-          if (doc.currentVersionNumber) {
-            item.currentVersionNumber = doc.currentVersionNumber;
-          }
+          if (doc.currentVersionId) item.currentVersionId = doc.currentVersionId;
+          if (doc.currentVersionNumber != null) item.currentVersionNumber = doc.currentVersionNumber;
+          if (doc.currentVersionIsFinal != null) item.isFinal = doc.currentVersionIsFinal;
           return item;
         });
         setDocuments(converted);
@@ -301,7 +302,7 @@ export default function TranslationsPending() {
     fetchDocuments();
   }, [categoryMap]);
 
-  type RowItem = DocumentListItem & { isCopyRow?: boolean; sourceDocumentId?: number; isLoadingRow?: boolean };
+  type RowItem = DocumentListItem & { isCopyRow?: boolean; sourceDocumentId?: number; isLoadingRow?: boolean; createdById?: number; rowNumber?: number; hasHandoverRequest?: boolean };
 
   // 필터링 및 정렬
   const filteredAndSortedDocuments = useMemo(() => {
@@ -339,6 +340,7 @@ export default function TranslationsPending() {
   }, [documents, selectedCategory, selectedStatus, sortOption]);
 
   const [startTranslationLoading, setStartTranslationLoading] = useState(false);
+  const [continueTranslationLoading, setContinueTranslationLoading] = useState(false);
   const [expandedSourceIds, setExpandedSourceIds] = useState<Set<number>>(new Set());
   const [copiesBySourceId, setCopiesBySourceId] = useState<Map<number, DocumentListItem[]>>(new Map());
   /** 해당 원문의 복사본(수정 중인 사람들의 문서) 로딩 중인 원문 ID */
@@ -352,13 +354,13 @@ export default function TranslationsPending() {
         const copies = copiesBySourceId.get(item.id); // 로딩 중이면 아직 키가 없어 undefined
         const isLoading = loadingCopySourceIds.has(item.id);
         if (isLoading && copies === undefined) {
-          // 로딩 중: 이 문서를 수정하고 있는 사람들의 문서 목록 로드 중
           rows.push({
             id: -item.id,
             title: '이 문서를 수정 중인 문서 불러오는 중…',
             isCopyRow: true,
             sourceDocumentId: item.id,
             isLoadingRow: true,
+            rowNumber: 1,
           } as RowItem);
         } else if (Array.isArray(copies)) {
           if (copies.length === 0) {
@@ -367,12 +369,13 @@ export default function TranslationsPending() {
               title: '이 원문을 수정 중인 문서가 없습니다.',
               isCopyRow: true,
               sourceDocumentId: item.id,
-              isLoadingRow: true, // 액션 없음, 클릭 무시
+              isLoadingRow: true,
+              rowNumber: 1,
             } as RowItem);
           } else {
-            for (const copy of copies) {
-              rows.push({ ...copy, isCopyRow: true, sourceDocumentId: item.id });
-            }
+            copies.forEach((copy, idx) => {
+              rows.push({ ...copy, isCopyRow: true, sourceDocumentId: item.id, rowNumber: idx + 1 });
+            });
           }
         }
       }
@@ -402,6 +405,11 @@ export default function TranslationsPending() {
             categoryMap
           );
           if (doc.createdBy?.name) listItem.currentWorker = doc.createdBy.name;
+          if (doc.createdBy?.id != null) (listItem as RowItem).createdById = doc.createdBy.id;
+          (listItem as RowItem).hasHandoverRequest = !!doc.latestHandover;
+          if (doc.currentVersionId) listItem.currentVersionId = doc.currentVersionId;
+          if (doc.currentVersionNumber != null) listItem.currentVersionNumber = doc.currentVersionNumber;
+          if (doc.currentVersionIsFinal != null) listItem.isFinal = doc.currentVersionIsFinal;
           return listItem;
         });
         setCopiesBySourceId((prev) => {
@@ -437,6 +445,20 @@ export default function TranslationsPending() {
       alert(msg);
     } finally {
       setStartTranslationLoading(false);
+    }
+  };
+
+  const handleContinueTranslation = async (doc: DocumentListItem) => {
+    if (continueTranslationLoading) return;
+    setContinueTranslationLoading(true);
+    try {
+      const newDoc = await documentApi.copyForContinuation(doc.id);
+      navigate(`/translations/${newDoc.id}/work`, { state: { from: '/translations/pending' } });
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || '이어서 새로 번역하기에 실패했습니다.';
+      alert(msg);
+    } finally {
+      setContinueTranslationLoading(false);
     }
   };
 
@@ -508,16 +530,44 @@ export default function TranslationsPending() {
     },
   };
 
+  const truncateUrl = (url: string, maxLen: number = 42) => {
+    if (!url || !url.trim()) return '';
+    const u = url.trim();
+    return u.length <= maxLen ? u : u.slice(0, maxLen) + '…';
+  };
+
+  const numberColumn: TableColumn<RowItem> = {
+    key: 'rowNumber',
+    label: '№',
+    width: '32px',
+    align: 'center',
+    render: (item) => {
+      const row = item as RowItem;
+      if (row.rowNumber != null) return <span style={{ fontSize: '12px', color: colors.secondaryText, fontWeight: 500 }}>{row.rowNumber}</span>;
+      return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>—</span>;
+    },
+  };
+
   const columns: TableColumn<RowItem>[] = [
+    numberColumn,
     expandColumn,
     {
       key: 'title',
       label: '문서 제목',
-      width: '22%',
+      width: 'minmax(0, 2fr)',
       render: (item) => {
         const isFavorite = favoriteStatus.get(item.id) || false;
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: item.isCopyRow ? 24 : 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              paddingLeft: item.isCopyRow ? 24 : 0,
+              minWidth: 0,
+              overflow: 'hidden',
+            }}
+          >
             {!item.isCopyRow && (
               <button
                 onClick={(e) => handleToggleFavorite(item, e)}
@@ -528,6 +578,7 @@ export default function TranslationsPending() {
                   padding: '4px',
                   display: 'flex',
                   alignItems: 'center',
+                  flexShrink: 0,
                   fontSize: '18px',
                   color: isFavorite ? '#FFD700' : '#C0C0C0',
                   transition: 'color 0.2s',
@@ -537,37 +588,119 @@ export default function TranslationsPending() {
                 {isFavorite ? '★' : '☆'}
               </button>
             )}
-            <span style={{ fontWeight: item.isCopyRow ? 400 : 500, color: '#000000' }}>{item.title}</span>
+            <span
+              style={{
+                fontWeight: item.isCopyRow ? 400 : 500,
+                color: '#000000',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={item.title}
+            >
+              {item.title}
+            </span>
             {item.isCopyRow && !(item as RowItem).isLoadingRow && (
-              <span style={{ fontSize: '11px', color: colors.secondaryText }}>(복사본)</span>
+              <span style={{ fontSize: '11px', color: colors.secondaryText, flexShrink: 0 }}>(복사본)</span>
             )}
           </div>
         );
       },
     },
     {
+      key: 'originalUrl',
+      label: '원문 URL',
+      width: 'minmax(0, 1.5fr)',
+      render: (item) => {
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        const url = item.originalUrl?.trim();
+        if (!url) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        return (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={url}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              fontSize: '12px',
+              color: '#2563eb',
+              textDecoration: 'none',
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {truncateUrl(url, 32)}
+          </a>
+        );
+      },
+    },
+    {
       key: 'status',
       label: '상태',
-      width: '10%',
+      width: 'minmax(0, 0.8fr)',
       render: (item) => {
-        if (!item.isCopyRow || (item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        if (!item.isCopyRow) {
+          return (
+            <span style={{
+              display: 'inline-block',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: 500,
+              backgroundColor: '#E8E6F0',
+              color: '#5B5694',
+            }}>
+              원문
+            </span>
+          );
+        }
+        if ((item as RowItem).hasHandoverRequest) {
+          return (
+            <span style={{
+              display: 'inline-block',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: 500,
+              backgroundColor: '#E8F0E8',
+              color: '#2E7D32',
+            }}>
+              인계 요청
+            </span>
+          );
+        }
         return <StatusBadge status={item.status} />;
       },
     },
     {
       key: 'category',
       label: '카테고리',
-      width: '8%',
+      width: 'minmax(0, 0.7fr)',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
-          {(item as RowItem).isLoadingRow ? '-' : item.category}
+          {(item as RowItem).isLoadingRow ? '-' : (item.category ?? '-')}
+        </span>
+      ),
+    },
+    {
+      key: 'estimatedLength',
+      label: '예상 분량',
+      width: 'minmax(0, 0.7fr)',
+      align: 'right',
+      render: (item) => (
+        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
+          {(item as RowItem).isLoadingRow ? '-' : (item.estimatedLength ? `${item.estimatedLength.toLocaleString()}자` : '-')}
         </span>
       ),
     },
     {
       key: 'lastModified',
       label: '최근 수정',
-      width: '10%',
+      width: 'minmax(0, 0.9fr)',
       align: 'right',
       render: (item) => (
         <span style={{ color: colors.primaryText, fontSize: '12px' }}>
@@ -578,7 +711,7 @@ export default function TranslationsPending() {
     {
       key: 'currentWorker',
       label: '작업자',
-      width: '10%',
+      width: 'minmax(0, 0.7fr)',
       render: (item) => {
         if (!item.isCopyRow || (item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
         return (
@@ -595,40 +728,35 @@ export default function TranslationsPending() {
     {
       key: 'currentVersion',
       label: '현재 버전',
-      width: '8%',
+      width: 'minmax(0, 0.5fr)',
       align: 'right',
       render: (item) => {
-        if (!item.isCopyRow || (item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
+        if (!item.isCopyRow) return <span style={{ color: colors.primaryText, fontSize: '12px' }}>v1</span>;
         return (
           <span style={{ color: colors.primaryText, fontSize: '12px' }}>
-            {item.currentVersionNumber ? `v${item.currentVersionNumber}` : '-'}
+            {item.isFinal ? 'FINAL' : (item.currentVersionNumber != null ? `v${item.currentVersionNumber}` : '-')}
           </span>
         );
       },
     },
     {
-      key: 'estimatedLength',
-      label: '예상 분량',
-      width: '10%',
-      align: 'right',
-      render: (item) => (
-        <span style={{ color: colors.primaryText, fontSize: '12px' }}>
-          {(item as RowItem).isLoadingRow ? '-' : (item.estimatedLength ? `${item.estimatedLength.toLocaleString()}자` : '-')}
-        </span>
-      ),
-    },
-    {
       key: 'action',
       label: '액션',
-      width: '20%',
+      width: '260px',
       align: 'right',
       render: (item) => {
         if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
         const isPending = item.status === 'PENDING_TRANSLATION';
-        const showStartBtn = isPending && !item.isCopyRow; // 원본만 번역 시작
+        const showStartBtn = isPending && !item.isCopyRow;
+        const isMyCopy = item.isCopyRow && Number((item as RowItem).createdById) === Number(user?.id);
+        const hasHandoverRequest = !!(item as RowItem).hasHandoverRequest;
+        const showResumeBtn = isMyCopy;
+        const showHandoverContinueBtn = item.isCopyRow && !isMyCopy && hasHandoverRequest; // 인계 요청된 복사본: 누구나 이어받기
+        const showContinueBtn = item.isCopyRow && isAdmin && !isMyCopy && !hasHandoverRequest; // 관리자만: 인계 아닌 복사본에서 이어서 새로 번역하기
 
         return (
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
             <Button
               variant="secondary"
               onClick={(e) => {
@@ -649,6 +777,42 @@ export default function TranslationsPending() {
                 style={{ fontSize: '12px', padding: '6px 12px' }}
               >
                 번역 시작
+              </Button>
+            )}
+            {showResumeBtn && (
+              <Button
+                variant="primary"
+                onClick={(e) => {
+                  if (e) e.stopPropagation();
+                  navigate(`/translations/${item.id}/work`, { state: { from: '/translations/pending' } });
+                }}
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+              >
+                이어하기
+              </Button>
+            )}
+            {showHandoverContinueBtn && (
+              <Button
+                variant="primary"
+                onClick={(e) => {
+                  if (e) e.stopPropagation();
+                  handleContinueTranslation(item);
+                }}
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+              >
+                이어받기
+              </Button>
+            )}
+            {showContinueBtn && (
+              <Button
+                variant="secondary"
+                onClick={(e) => {
+                  if (e) e.stopPropagation();
+                  handleContinueTranslation(item);
+                }}
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+              >
+                이어서 새로 번역하기
               </Button>
             )}
           </div>
@@ -817,6 +981,24 @@ export default function TranslationsPending() {
               } else {
                 toggleSourceExpand(item.id);
               }
+            }}
+            getRowStyle={(item) => {
+              const row = item as RowItem;
+              if (row.isLoadingRow) {
+                return { backgroundColor: '#E8E8E8', borderLeft: '4px solid #B0B0B0' };
+              }
+              if (row.isCopyRow) {
+                return { backgroundColor: '#E0E0E0', borderLeft: '4px solid #909090' };
+              }
+              if (expandedSourceIds.has(row.id)) {
+                return { backgroundColor: '#F0F0F0', borderLeft: '3px solid #707070' };
+              }
+              return {};
+            }}
+            getRowHoverStyle={(item) => {
+              const row = item as RowItem;
+              if (row.isCopyRow || row.isLoadingRow) return { backgroundColor: '#C8C8C8' };
+              return undefined;
             }}
             emptyMessage="번역 대기 문서가 없습니다. 새 번역 등록에서 문서를 생성하거나, 기존 문서의 상태를 '번역 대기'로 변경해주세요."
           />

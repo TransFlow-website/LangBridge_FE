@@ -993,25 +993,6 @@ export default function TranslationWork() {
     };
   }, [editorMode, isTranslationEditorInitialized, savedTranslationHtml]); // ⭐ savedTranslationHtml 추가하여 undo/redo 후 자동 재활성화
 
-  // 자동 저장 (디바운스)
-  useEffect(() => {
-    if (!documentId || !savedTranslationHtml) return;
-
-    const timeoutId = setTimeout(async () => {
-      try {
-        await translationWorkApi.saveTranslation(documentId, {
-          content: savedTranslationHtml,
-          completedParagraphs: Array.from(completedParagraphs),
-        });
-        console.log('💾 자동 저장 완료');
-      } catch (error) {
-        console.error('자동 저장 실패:', error);
-      }
-    }, 2000); // 2초 후 저장
-
-    return () => clearTimeout(timeoutId);
-  }, [savedTranslationHtml, documentId, completedParagraphs]);
-
   // 더보기 메뉴 외부 클릭 시 닫기
   useEffect(() => {
     if (!showMoreMenu) return;
@@ -1383,20 +1364,28 @@ export default function TranslationWork() {
 
     try {
       setHandoverSubmitting(true);
-      // 1. 현 지점으로 먼저 저장
-      await translationWorkApi.saveTranslation(documentId, {
-        content: savedTranslationHtml,
-        completedParagraphs: Array.from(completedParagraphs),
-      });
-      // 2. 인계 요청
-      await translationWorkApi.handover(documentId, {
-        memo: handoverMemo.trim(),
-        terms: handoverTerms.trim() || undefined,
-      });
+      try {
+        await translationWorkApi.saveTranslation(documentId, {
+          content: savedTranslationHtml,
+          completedParagraphs: Array.from(completedParagraphs),
+        });
+      } catch (saveErr: any) {
+        const msg = (saveErr as any).response?.data?.message ?? (saveErr as any).message ?? (saveErr as any).response?.statusText ?? '서버 오류';
+        alert('저장 실패: ' + msg);
+        return;
+      }
+      try {
+        await translationWorkApi.handover(documentId, {
+          memo: handoverMemo.trim(),
+          terms: handoverTerms.trim() || undefined,
+        });
+      } catch (handoverErr: any) {
+        const msg = (handoverErr as any).response?.data?.message ?? (handoverErr as any).message ?? (handoverErr as any).response?.statusText ?? '서버 오류';
+        alert('인계 요청 실패: ' + msg);
+        return;
+      }
       alert('인계가 완료되었습니다.');
       navigate(fromPath);
-    } catch (error: any) {
-      alert('인계 실패: ' + (error.response?.data?.message || error.message));
     } finally {
       setHandoverSubmitting(false);
     }
@@ -1504,14 +1493,11 @@ export default function TranslationWork() {
           <Button 
             variant="secondary" 
             onClick={() => {
-              // 저장되지 않은 변경사항이 있는지 확인
               const hasUnsavedChanges = savedTranslationHtml !== lastSavedHtml;
-              
               if (hasUnsavedChanges) {
-                const confirmed = window.confirm('⚠️ 저장되지 않은 변경사항이 있습니다. 정말 나가시겠습니까?');
+                const confirmed = window.confirm('저장하지 않으면 변경사항이 사라집니다. 나가시겠습니까?');
                 if (!confirmed) return;
               }
-              
               navigate(fromPath);
             }} 
             style={{ fontSize: '12px', padding: '6px 12px' }}
