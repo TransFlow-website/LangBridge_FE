@@ -133,21 +133,36 @@ export default function DocumentDetail() {
         const status = doc.status as DocumentState;
         
         if (status === DocumentState.PUBLISHED || status === DocumentState.APPROVED) {
-          // 게시 완료/승인 완료: FINAL 버전 우선
-          currentVersion = versionList.find(v => v.versionType === 'FINAL');
-          currentVersionType = currentVersion ? 'FINAL' : '';
+          // 게시 완료/승인 완료:
+          // 1) isFinal=true 인 버전 우선
+          // 2) 없으면 versionType === 'FINAL'
+          // 3) 그래도 없으면 가장 최신 MANUAL_TRANSLATION
+          const finalByFlag = versionList.find(v => v.isFinal === true);
+          const finalByType = versionList.find(v => v.versionType === 'FINAL');
+          const latestManual = versionList
+            .filter(v => v.versionType === 'MANUAL_TRANSLATION')
+            .sort((a, b) => b.versionNumber - a.versionNumber)[0];
+          
+          currentVersion = finalByFlag || finalByType || latestManual;
+          if (currentVersion) {
+            currentVersionType = currentVersion.isFinal ? 'FINAL' : currentVersion.versionType;
+          }
         } else if (status === DocumentState.PENDING_REVIEW) {
-          // 검토 중: MANUAL_TRANSLATION 또는 FINAL
-          currentVersion = versionList.find(v => v.versionType === 'FINAL') ||
+          // 검토 중: FINAL(플래그/타입) 또는 MANUAL_TRANSLATION
+          const finalByFlag = versionList.find(v => v.isFinal === true);
+          const finalByType = versionList.find(v => v.versionType === 'FINAL');
+          currentVersion = finalByFlag || finalByType ||
                           versionList.find(v => v.versionType === 'MANUAL_TRANSLATION');
-          currentVersionType = currentVersion?.versionType || '';
+          currentVersionType = currentVersion
+            ? (currentVersion.isFinal ? 'FINAL' : currentVersion.versionType)
+            : '';
         } else if (status === DocumentState.IN_TRANSLATION) {
           // 번역 중: MANUAL_TRANSLATION (있다면), 없으면 AI_DRAFT
           currentVersion = versionList.find(v => v.versionType === 'MANUAL_TRANSLATION') ||
                           aiDraftVersion;
           currentVersionType = currentVersion?.versionType || '';
         } else if (status === DocumentState.DRAFT || status === DocumentState.PENDING_TRANSLATION) {
-          // 초안/번역 대기: MANUAL_TRANSLATION이 있으면(인계 전환 등) 최신 MANUAL, 없으면 AI_DRAFT
+          // 초안/번역 대기: MANUAL_TRANSLATION 최신, 없으면 AI_DRAFT
           const latestManual = versionList
             .filter(v => v.versionType === 'MANUAL_TRANSLATION')
             .sort((a, b) => b.versionNumber - a.versionNumber)[0];
@@ -355,9 +370,15 @@ export default function DocumentDetail() {
     );
   }
 
-  // 현재 버전 제목 결정 (버전 번호 포함)
+  // 현재 버전 제목 결정 (버전 번호 + FINAL 여부 포함)
   const getCurrentVersionTitle = (): string => {
     if (currentVersionInfo.version) {
+      const isFinal =
+        currentVersionInfo.version.isFinal === true ||
+        currentVersionInfo.versionType === 'FINAL';
+      if (isFinal) {
+        return `현재 버전 (FINAL · Version ${currentVersionInfo.version.versionNumber})`;
+      }
       return `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`;
     }
     return '현재 버전';
@@ -450,7 +471,9 @@ export default function DocumentDetail() {
                   <span style={{ fontSize: '11px', color: colors.secondaryText }}>
                     {document.categoryId ? `카테고리 ${document.categoryId}` : '미분류'} · {
                       currentVersionInfo.version 
-                        ? `Version ${currentVersionInfo.version.versionNumber}`
+                        ? currentVersionInfo.version.isFinal === true || currentVersionInfo.versionType === 'FINAL'
+                          ? `FINAL · Version ${currentVersionInfo.version.versionNumber}`
+                          : `Version ${currentVersionInfo.version.versionNumber}`
                         : document.hasVersions === false 
                           ? '버전 없음'
                           : 'Version 1'
@@ -533,7 +556,9 @@ export default function DocumentDetail() {
               />
               <span>
                 {currentVersionInfo.version 
-                  ? `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`
+                  ? (currentVersionInfo.version.isFinal === true || currentVersionInfo.versionType === 'FINAL'
+                      ? `현재 버전 (FINAL · Version ${currentVersionInfo.version.versionNumber})`
+                      : `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`)
                   : '현재 버전'}
               </span>
             </label>

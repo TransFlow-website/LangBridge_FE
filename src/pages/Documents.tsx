@@ -62,6 +62,7 @@ const convertToDocumentListItem = (doc: DocumentResponse): DocumentListItem => {
     isFinal: doc.currentVersionIsFinal === true,
     originalUrl: doc.originalUrl,
     hasVersions: doc.hasVersions === true,
+    sourceDocumentId: doc.sourceDocumentId ?? null,
   };
   if (doc.createdBy?.name) item.currentWorker = doc.createdBy.name;
   if (doc.currentVersionId != null) item.currentVersionId = doc.currentVersionId;
@@ -287,7 +288,7 @@ export default function Documents() {
   const tableData: RowItem[] = useMemo(() => {
     const rows: RowItem[] = [];
     for (const item of filteredAndSortedDocuments) {
-      rows.push({ ...item, isCopyRow: false });
+      rows.push({ ...(item as RowItem), isCopyRow: false });
       if (expandedSourceIds.has(item.id)) {
         const copies = copiesBySourceId.get(item.id);
         const isLoading = loadingCopySourceIds.has(item.id);
@@ -1134,11 +1135,25 @@ export default function Documents() {
           cancelText="취소"
           variant="danger"
         >
-          <p>
-            정말로 "{selectedDocument?.title}" 문서를 삭제하시겠습니까?
-            <br />
-            이 작업은 되돌릴 수 없습니다.
-          </p>
+          {selectedDocument && (
+            <div style={{ fontSize: '13px', color: colors.primaryText, lineHeight: 1.6 }}>
+              <p style={{ marginBottom: '8px' }}>
+                정말로 "<strong>{selectedDocument.title}</strong>" 문서를 삭제하시겠습니까?
+              </p>
+              {selectedDocument.sourceDocumentId == null ? (
+                <p style={{ marginBottom: '8px', color: '#b91c1c' }}>
+                  이 문서는 <strong>원문</strong>입니다. 이 문서를 삭제하면
+                  <br />
+                  이 원문을 기반으로 생성된 <strong>모든 복사본(다른 사람이 작업 중인 문서 포함)</strong>이 함께 삭제됩니다.
+                </p>
+              ) : (
+                <p style={{ marginBottom: '8px', color: colors.secondaryText }}>
+                  이 문서는 <strong>복사본</strong>입니다. 이 문서만 삭제되며, 원문과 다른 복사본에는 영향이 없습니다.
+                </p>
+              )}
+              <p style={{ marginTop: '4px' }}>이 작업은 되돌릴 수 없습니다.</p>
+            </div>
+          )}
         </Modal>
 
         {/* 문서 관리 모달 */}

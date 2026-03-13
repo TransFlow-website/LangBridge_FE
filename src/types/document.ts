@@ -25,6 +25,7 @@ export interface DocumentListItem {
   currentVersionId?: number; // 현재 버전 ID
   currentVersionNumber?: number; // 현재 버전 번호 (1, 2, 3...)
   hasVersions?: boolean; // 버전 존재 여부
+  sourceDocumentId?: number | null; // 원문 문서 ID (복사본인 경우)
 }
 
 export interface DocumentFilter {
