@@ -26,6 +26,21 @@ jobs:
             VITE_API_URL: ${{ secrets.VITE_API_URL }}
             VITE_API_URL_BASE: ${{ secrets.VITE_API_URL_BASE }}
 
+      - name: Debug connection to server
+        run: |
+            sudo apt-get install -y traceroute
+            echo "Runner IP:"
+            curl -s ifconfig.me
+            echo ""
+            echo "DNS resolve:"
+            nslookup ${{ secrets.SERVER_HOST }}
+            echo ""
+            echo "Testing SSH:"
+            nc -zv ${{ secrets.SERVER_HOST }} 22 -w 10
+            echo ""
+            echo "Testing traceroute:"
+            traceroute -m 15 ${{ secrets.SERVER_HOST }}
+
       - name: Deploy to server via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
