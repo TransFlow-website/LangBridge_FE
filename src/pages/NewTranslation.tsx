@@ -6,21 +6,26 @@ import { roleLevelToRole } from '../utils/hasAccess';
 import { UserRole } from '../types/user';
 import { DocumentState, TranslationDraft, SelectedArea } from '../types/translation';
 import { Button } from '../components/Button';
+import { Modal } from '../components/Modal';
 import { WysiwygEditor, EditorMode } from '../components/WysiwygEditor';
 import { documentApi, DocumentResponse } from '../services/documentApi';
 import { translationApi } from '../services/api';
 import { AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Palette, Quote, Minus, Link2, Highlighter, Image, Table, Code, Superscript, Subscript, MoreVertical, Undo2, Redo2 } from 'lucide-react';
+
+// 수동 서식 넣기용 최소 HTML 템플릿
+const MANUAL_PASTE_HTML = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:system-ui,Pretendard,sans-serif;padding:16px;margin:0;min-height:400px;}</style></head><body><div contenteditable="true" style="min-height:400px;outline:none;"></div></body></html>';
 
 // STEP 1: 크롤링 주소 입력
 const Step1CrawlingInput: React.FC<{
   url: string;
   setUrl: (url: string) => void;
   onExecute: () => void;
+  onManualPaste?: () => void;
   isLoading: boolean;
   loadingProgress?: number;
   draftDocuments?: DocumentResponse[];
   onLoadDraft?: (doc: DocumentResponse) => void;
-}> = ({ url, setUrl, onExecute, isLoading, loadingProgress = 0, draftDocuments = [], onLoadDraft }) => {
+}> = ({ url, setUrl, onExecute, onManualPaste, isLoading, loadingProgress = 0, draftDocuments = [], onLoadDraft }) => {
   const [showDraftList, setShowDraftList] = useState(false);
 
   return (
@@ -155,7 +160,7 @@ const Step1CrawlingInput: React.FC<{
           }}
         />
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <Button
           variant="primary"
           onClick={onExecute}
@@ -163,12 +168,25 @@ const Step1CrawlingInput: React.FC<{
         >
           {isLoading ? '크롤링 중...' : '크롤링 실행'}
         </Button>
+        <Button
+          variant="secondary"
+          onClick={onManualPaste}
+          disabled={isLoading}
+          style={{ fontSize: '13px' }}
+        >
+          수동 서식 넣기
+        </Button>
         {isLoading && loadingProgress > 0 && (
           <span style={{ fontSize: '13px', color: '#696969', fontWeight: 600 }}>
             {Math.round(loadingProgress)}%
           </span>
         )}
       </div>
+      {onManualPaste && (
+        <span style={{ fontSize: '12px', color: '#696969' }}>
+          크롤링이 잘 되지 않을 때 웹사이트에서 복사한 내용을 붙여넣기 할 수 있습니다
+        </span>
+      )}
     </div>
   );
 };
@@ -665,9 +683,11 @@ const Step3PreEdit: React.FC<{
   html: string;
   onHtmlChange: (html: string) => void;
   selectedAreas: SelectedArea[];
-}> = ({ html, onHtmlChange, selectedAreas }) => {
+  isManualPasteMode?: boolean;
+  onClearForManualPaste?: () => void;
+}> = ({ html, onHtmlChange, selectedAreas, isManualPasteMode = false, onClearForManualPaste }) => {
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
-  const [mode, setMode] = useState<'text' | 'component' | 'spacing' | 'spacing-all'>('text');
+  const [mode, setMode] = useState<'text' | 'component' | 'spacing'>('text');
   const [selectedElements, setSelectedElements] = useState<HTMLElement[]>([]); // 다중 선택
   const [isInitialized, setIsInitialized] = useState(false); // 초기화 플래그
   
@@ -689,6 +709,8 @@ const Step3PreEdit: React.FC<{
   const windowKeydownHandlerRef = React.useRef<((e: KeyboardEvent) => void) | null>(null);
   const iframeKeydownHandlerRef = React.useRef<((e: KeyboardEvent) => void) | null>(null);
   
+  // 이전 모드 추적 (spacing 블록에서 선택 초기화 시 사용)
+  const prevModeRef = React.useRef<'text' | 'component' | 'spacing'>('text');
   // 공백 제거 상태 추적
   const spacingRemovedRef = React.useRef<{
     top: boolean;
@@ -777,6 +799,24 @@ const Step3PreEdit: React.FC<{
       }
       iframeDoc.head.appendChild(linkStyle);
       
+      // ⭐ 포커스 시 파란색/outline 제거 (브라우저 기본 포커스 링 제거)
+      const focusStyle = iframeDoc.getElementById('text-edit-no-focus-outline');
+      if (focusStyle) focusStyle.remove();
+      const noFocusOutline = iframeDoc.createElement('style');
+      noFocusOutline.id = 'text-edit-no-focus-outline';
+      noFocusOutline.textContent = `
+        *, *:focus, [contenteditable="true"], [contenteditable="true"]:focus,
+        div:focus, p:focus, span:focus {
+          outline: none !important;
+          box-shadow: none !important;
+        }
+      `;
+      iframeDoc.head.appendChild(noFocusOutline);
+      
+      // transflow-selection-style 제거 (파란/보라색 호버 스타일 제거)
+      const transflowSelectionStyle = iframeDoc.getElementById('transflow-selection-style');
+      if (transflowSelectionStyle) transflowSelectionStyle.remove();
+      
       // 컴포넌트 편집 스타일 제거 및 이벤트 리스너 제거
       const allElements = iframeDoc.querySelectorAll('[data-component-editable]');
       allElements.forEach(el => {
@@ -816,6 +856,19 @@ const Step3PreEdit: React.FC<{
         el.removeEventListener('click', handler, true);
       });
       componentClickHandlersRef.current.clear();
+      
+      // 공백 제거 모드 스타일 및 속성 제거
+      const spacingEditableInText = iframeDoc.querySelectorAll('[data-spacing-editable]');
+      spacingEditableInText.forEach(el => {
+        const htmlEl = el as HTMLElement;
+        htmlEl.classList.remove('spacing-selected');
+        htmlEl.removeAttribute('data-spacing-editable');
+        htmlEl.style.outline = 'none';
+        htmlEl.style.boxShadow = 'none';
+        htmlEl.style.backgroundColor = '';
+      });
+      const spacingStyleInText = iframeDoc.getElementById('transflow-spacing-global-style');
+      if (spacingStyleInText) spacingStyleInText.remove();
       
       // 공백 제거 모드 클릭 핸들러 제거
       spacingClickHandlersRef.current.forEach((handler, el) => {
@@ -869,6 +922,7 @@ const Step3PreEdit: React.FC<{
       // 새 리스너 등록 및 저장
       iframeKeydownHandlerRef.current = handleTextKeydown;
       iframeDoc.addEventListener('keydown', handleTextKeydown, true);
+      prevModeRef.current = 'text';
       console.log('✅ Step 3 텍스트 모드 키보드 단축키 등록 완료');
       
     } else if (mode === 'component') {
@@ -892,15 +946,18 @@ const Step3PreEdit: React.FC<{
         linkStyle.remove();
       }
       
-      // 공백 제거 모드 선택 스타일 제거
-      const spacingSelectedElements = iframeDoc.querySelectorAll('.spacing-selected');
-      spacingSelectedElements.forEach(el => {
+      // 공백 제거 모드 선택 스타일 및 속성 제거
+      const spacingEditableElements = iframeDoc.querySelectorAll('[data-spacing-editable]');
+      spacingEditableElements.forEach(el => {
         const htmlEl = el as HTMLElement;
         htmlEl.classList.remove('spacing-selected');
+        htmlEl.removeAttribute('data-spacing-editable');
         htmlEl.style.outline = 'none';
         htmlEl.style.boxShadow = 'none';
         htmlEl.style.backgroundColor = '';
       });
+      const spacingGlobalStyle = iframeDoc.getElementById('transflow-spacing-global-style');
+      if (spacingGlobalStyle) spacingGlobalStyle.remove();
       
       // 공백 제거 모드 클릭 핸들러 제거
       spacingClickHandlersRef.current.forEach((handler, el) => {
@@ -908,7 +965,24 @@ const Step3PreEdit: React.FC<{
       });
       spacingClickHandlersRef.current.clear();
       
-      // 클릭 가능한 컴포넌트 스타일 추가
+      // 클릭 가능한 컴포넌트 스타일 추가 (붙여넣은 HTML의 outline 덮어쓰기 위해 !important 스타일 시트 추가)
+      const componentGlobalStyle = iframeDoc.getElementById('transflow-component-global-style') as HTMLStyleElement | null;
+      if (componentGlobalStyle) componentGlobalStyle.remove();
+      const newComponentGlobalStyle = iframeDoc.createElement('style');
+      newComponentGlobalStyle.id = 'transflow-component-global-style';
+      newComponentGlobalStyle.textContent = `
+        [data-component-editable="true"] {
+          outline: 2px dashed #C0C0C0 !important;
+          outline-offset: 2px !important;
+        }
+        [data-component-editable="true"].component-selected {
+          outline: 4px solid #28a745 !important;
+          outline-offset: 3px !important;
+          background-color: rgba(40, 167, 69, 0.25) !important;
+        }
+      `;
+      iframeDoc.head.appendChild(newComponentGlobalStyle);
+      
       const componentElements = iframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6');
       
       // 컴포넌트 클릭 핸들러 (다중 선택 + 토글)
@@ -927,20 +1001,20 @@ const Step3PreEdit: React.FC<{
         if (isSelected) {
           // 선택 해제
           target.classList.remove('component-selected');
-          target.style.outline = '1px dashed #C0C0C0';
-          target.style.boxShadow = 'none';
-          target.style.backgroundColor = '';
+          target.style.setProperty('outline', '2px dashed #C0C0C0', 'important');
+          target.style.setProperty('outline-offset', '2px', 'important');
+          target.style.setProperty('box-shadow', 'none', 'important');
+          target.style.setProperty('background-color', '', 'important');
           console.log('❌ 선택 해제:', target.tagName);
           
           setSelectedElements(prev => prev.filter(el => el !== target));
         } else {
-          // 선택 추가 (STEP 2와 동일한 녹색 스타일)
+          // 선택 추가 (STEP 2와 동일한 녹색 스타일, !important로 붙여넣은 스타일 덮어쓰기)
           target.classList.add('component-selected');
-          target.style.outline = '4px solid #28a745';
-          target.style.outlineOffset = '3px';
-          target.style.backgroundColor = 'rgba(40, 167, 69, 0.25)';
-          target.style.boxShadow = '0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5)';
-          target.style.transition = 'all 0.2s ease';
+          target.style.setProperty('outline', '4px solid #28a745', 'important');
+          target.style.setProperty('outline-offset', '3px', 'important');
+          target.style.setProperty('background-color', 'rgba(40, 167, 69, 0.25)', 'important');
+          target.style.setProperty('box-shadow', '0 0 0 4px rgba(40, 167, 69, 0.4), 0 4px 12px rgba(40, 167, 69, 0.5)', 'important');
           console.log('✅ 선택 추가:', target.tagName);
           
           setSelectedElements(prev => [...prev, target]);
@@ -952,7 +1026,8 @@ const Step3PreEdit: React.FC<{
           const htmlEl = el as HTMLElement;
           htmlEl.setAttribute('data-component-editable', 'true');
           htmlEl.style.cursor = 'pointer';
-          htmlEl.style.outline = '1px dashed #C0C0C0';
+          htmlEl.style.setProperty('outline', '2px dashed #C0C0C0', 'important');
+          htmlEl.style.setProperty('outline-offset', '2px', 'important');
           
           // 기존 핸들러가 있으면 제거
           const existingHandler = componentClickHandlersRef.current.get(htmlEl);
@@ -1288,30 +1363,22 @@ const Step3PreEdit: React.FC<{
       // 새 window 리스너 등록 및 저장
       windowKeydownHandlerRef.current = handleWindowKeydown;
       window.addEventListener('keydown', handleWindowKeydown, true);
+      prevModeRef.current = 'component';
       console.log('✅ Step 3 window 키보드 이벤트 리스너 등록 완료');
       
     } else if (mode === 'spacing') {
-      // 공백 제거 모드
-      // contentEditable 비활성화
+      // 수동 공백 제거 모드 (컴포넌트 편집 모드와 동일하게 전역 스타일로 점선 적용)
       const editableElements = iframeDoc.querySelectorAll('[contenteditable="true"]');
       editableElements.forEach((el) => {
         (el as HTMLElement).contentEditable = 'false';
         (el as HTMLElement).style.cursor = 'pointer';
       });
-      
-      // ⭐ 링크 클릭 핸들러 제거
       linkClickHandlersRef.current.forEach((handler, link) => {
         link.removeEventListener('click', handler, true);
       });
       linkClickHandlersRef.current.clear();
-      
-      // 링크 스타일 태그 제거
       const linkStyle = iframeDoc.getElementById('text-edit-link-style');
-      if (linkStyle) {
-        linkStyle.remove();
-      }
-      
-      // 컴포넌트 편집 스타일 제거
+      if (linkStyle) linkStyle.remove();
       const componentElements = iframeDoc.querySelectorAll('[data-component-editable]');
       componentElements.forEach(el => {
         const htmlEl = el as HTMLElement;
@@ -1319,184 +1386,77 @@ const Step3PreEdit: React.FC<{
         htmlEl.style.boxShadow = 'none';
         htmlEl.classList.remove('component-selected');
         htmlEl.removeAttribute('data-component-editable');
-        
-        // 컴포넌트 클릭 핸들러 제거
         const handler = componentClickHandlersRef.current.get(htmlEl);
         if (handler) {
           htmlEl.removeEventListener('click', handler, true);
           componentClickHandlersRef.current.delete(htmlEl);
         }
       });
-      
-      // 모든 컴포넌트 클릭 핸들러 제거
-      componentClickHandlersRef.current.forEach((handler, el) => {
-        el.removeEventListener('click', handler, true);
-      });
       componentClickHandlersRef.current.clear();
-      
-      // 공백 제거 모드용 클릭 핸들러
+      const transflowElements = iframeDoc.querySelectorAll('[data-transflow-id]');
+      transflowElements.forEach(el => {
+        const htmlEl = el as HTMLElement;
+        htmlEl.style.outline = 'none';
+        htmlEl.style.boxShadow = 'none';
+      });
+      // 컴포넌트 모드처럼 전역 스타일로 점선 적용
+      const spacingGlobalStyle = iframeDoc.getElementById('transflow-spacing-global-style') as HTMLStyleElement | null;
+      if (spacingGlobalStyle) spacingGlobalStyle.remove();
+      const newSpacingGlobalStyle = iframeDoc.createElement('style');
+      newSpacingGlobalStyle.id = 'transflow-spacing-global-style';
+      newSpacingGlobalStyle.textContent = `
+        [data-spacing-editable="true"] {
+          outline: 2px dashed #FFA500 !important;
+          outline-offset: 2px !important;
+        }
+        [data-spacing-editable="true"].spacing-selected {
+          outline: 4px solid #FFA500 !important;
+          outline-offset: 3px !important;
+          background-color: rgba(255, 165, 0, 0.25) !important;
+        }
+      `;
+      iframeDoc.head.appendChild(newSpacingGlobalStyle);
       const handleSpacingClick = (e: Event) => {
         e.stopPropagation();
         e.preventDefault();
-        
         const target = e.target as HTMLElement;
-        if (!target || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(target.tagName)) return;
-        
-        console.log('🎯 공백 제거 모드 클릭:', target.tagName);
-        
-        // 이미 선택된 요소인지 확인 (토글)
+        if (!target || !target.hasAttribute('data-spacing-editable')) return;
         const isSelected = target.classList.contains('spacing-selected');
-        
         if (isSelected) {
-          // 선택 해제
           target.classList.remove('spacing-selected');
-          target.style.outline = '1px dashed #FFA500';
-          target.style.boxShadow = 'none';
-          target.style.backgroundColor = '';
-          console.log('❌ 공백 제거 선택 해제:', target.tagName);
-          
           setSelectedElements(prev => prev.filter(el => el !== target));
         } else {
-          // 선택 추가 (주황색 스타일)
           target.classList.add('spacing-selected');
-          target.style.outline = '4px solid #FFA500';
-          target.style.outlineOffset = '3px';
-          target.style.backgroundColor = 'rgba(255, 165, 0, 0.25)';
-          target.style.boxShadow = '0 0 0 4px rgba(255, 165, 0, 0.4), 0 4px 12px rgba(255, 165, 0, 0.5)';
-          target.style.transition = 'all 0.2s ease';
-          console.log('✅ 공백 제거 선택 추가:', target.tagName);
-          
           setSelectedElements(prev => [...prev, target]);
         }
       };
-      
-      // 클릭 가능한 요소들에 스타일 추가
       const spacingElements = iframeDoc.querySelectorAll('div, section, article, header, footer, main, aside, nav, p, h1, h2, h3, h4, h5, h6');
-      
       spacingElements.forEach((el) => {
-        if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(el.tagName)) {
+        if (el.tagName && !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(el.tagName)) {
           const htmlEl = el as HTMLElement;
+          htmlEl.setAttribute('data-spacing-editable', 'true');
           htmlEl.style.cursor = 'pointer';
-          htmlEl.style.outline = '1px dashed #FFA500';
-          
-          // 기존 핸들러가 있으면 제거
           const existingHandler = spacingClickHandlersRef.current.get(htmlEl);
-          if (existingHandler) {
-            htmlEl.removeEventListener('click', existingHandler, true);
-          }
-          
-          // 클릭 이벤트 리스너 추가 및 저장
+          if (existingHandler) htmlEl.removeEventListener('click', existingHandler, true);
           htmlEl.addEventListener('click', handleSpacingClick, true);
           spacingClickHandlersRef.current.set(htmlEl, handleSpacingClick);
         }
       });
-      
-      // ⭐ 링크 클릭 방지 (다른 사이트로 이동 방지)
       const allLinks = iframeDoc.querySelectorAll('a');
-      const preventLinkNavigation = (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        return false;
-      };
-      
+      const preventLinkNav = (ev: Event) => { ev.preventDefault(); ev.stopPropagation(); return false; };
       allLinks.forEach(link => {
         const htmlLink = link as HTMLElement;
-        // 기존 핸들러가 있으면 제거
-        const existingLinkHandler = linkClickHandlersRef.current.get(htmlLink);
-        if (existingLinkHandler) {
-          htmlLink.removeEventListener('click', existingLinkHandler, true);
-        }
-        htmlLink.addEventListener('click', preventLinkNavigation, true);
-        linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
-        htmlLink.style.cursor = 'pointer';
+        const existing = linkClickHandlersRef.current.get(htmlLink);
+        if (existing) htmlLink.removeEventListener('click', existing, true);
+        htmlLink.addEventListener('click', preventLinkNav, true);
+        linkClickHandlersRef.current.set(htmlLink, preventLinkNav);
       });
-      
-      console.log('✅ 공백 제거 모드 클릭 리스너 추가 완료:', spacingElements.length, '개');
-      console.log('✅ 링크 클릭 방지 핸들러 추가 완료:', allLinks.length, '개');
-      
-    } else if (mode === 'spacing-all') {
-      // 전체 공백 제거 모드 (Step 2에서 선택한 영역 전체에 공백 제거)
-      // contentEditable 비활성화
-      const editableElements = iframeDoc.querySelectorAll('[contenteditable="true"]');
-      editableElements.forEach((el) => {
-        (el as HTMLElement).contentEditable = 'false';
-        (el as HTMLElement).style.cursor = 'default';
-      });
-      
-      // ⭐ 링크 클릭 핸들러 제거
-      linkClickHandlersRef.current.forEach((handler, link) => {
-        link.removeEventListener('click', handler, true);
-      });
-      linkClickHandlersRef.current.clear();
-      
-      // 링크 스타일 태그 제거
-      const linkStyle = iframeDoc.getElementById('text-edit-link-style');
-      if (linkStyle) {
-        linkStyle.remove();
+      // 모드 전환 시에만 선택 초기화 (작업 후 재진입 시 선택 유지)
+      if (prevModeRef.current !== 'spacing') {
+        setSelectedElements([]);
       }
-      
-      // ⭐ 링크 클릭 방지 (다른 사이트로 이동 방지)
-      const allLinks = iframeDoc.querySelectorAll('a');
-      const preventLinkNavigation = (e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        return false;
-      };
-      
-      allLinks.forEach(link => {
-        const htmlLink = link as HTMLElement;
-        htmlLink.addEventListener('click', preventLinkNavigation, true);
-        linkClickHandlersRef.current.set(htmlLink, preventLinkNavigation);
-        htmlLink.style.cursor = 'default';
-      });
-      
-      console.log('✅ 전체 공백 제거 모드 링크 클릭 방지 핸들러 추가 완료:', allLinks.length, '개');
-      
-      // 컴포넌트 편집 스타일 제거
-      const componentElements = iframeDoc.querySelectorAll('[data-component-editable]');
-      componentElements.forEach(el => {
-        const htmlEl = el as HTMLElement;
-        htmlEl.style.outline = 'none';
-        htmlEl.style.boxShadow = 'none';
-        htmlEl.classList.remove('component-selected');
-        htmlEl.removeAttribute('data-component-editable');
-        
-        // 컴포넌트 클릭 핸들러 제거
-        const handler = componentClickHandlersRef.current.get(htmlEl);
-        if (handler) {
-          htmlEl.removeEventListener('click', handler, true);
-          componentClickHandlersRef.current.delete(htmlEl);
-        }
-      });
-      
-      // 모든 컴포넌트 클릭 핸들러 제거
-      componentClickHandlersRef.current.forEach((handler, el) => {
-        el.removeEventListener('click', handler, true);
-      });
-      componentClickHandlersRef.current.clear();
-      
-      // 공백 제거 모드 선택 스타일 제거
-      const spacingSelectedElements = iframeDoc.querySelectorAll('.spacing-selected');
-      spacingSelectedElements.forEach(el => {
-        const htmlEl = el as HTMLElement;
-        htmlEl.classList.remove('spacing-selected');
-        htmlEl.style.outline = 'none';
-        htmlEl.style.boxShadow = 'none';
-        htmlEl.style.backgroundColor = '';
-      });
-      
-      // 공백 제거 모드 클릭 핸들러 제거
-      spacingClickHandlersRef.current.forEach((handler, el) => {
-        el.removeEventListener('click', handler, true);
-      });
-      spacingClickHandlersRef.current.clear();
-      
-      // 선택된 요소 초기화 (전체 공백 제거 모드에서는 선택 기능 없음)
-      setSelectedElements([]);
-      
-      console.log('✅ 전체 공백 제거 모드 활성화 (Step 2 선택 영역 전체에 공백 제거 적용)');
+      prevModeRef.current = 'spacing';
+      console.log('✅ 수동 공백 제거 모드 활성화');
     }
     
     // ⭐ Cleanup: window 이벤트 리스너 제거
@@ -1519,16 +1479,17 @@ const Step3PreEdit: React.FC<{
       hasIframe: !!iframeRef.current,
       hasHtml: !!html,
       selectedAreasCount: selectedAreas.length,
-      selectedAreasIds: selectedAreas.map(a => a.id)
+      isManualPasteMode,
     });
     
-    if (iframeRef.current && html && selectedAreas.length > 0) {
-      const iframe = iframeRef.current;
+    const canInit = iframeRef.current && (html || isManualPasteMode) && (selectedAreas.length > 0 || isManualPasteMode);
+    if (canInit) {
+      const iframe = iframeRef.current!;
       const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
       
       if (iframeDoc) {
-        // 원본 HTML을 iframe에 로드
-        let htmlContent = html;
+        // 수동 붙여넣기 모드: 최소 HTML 사용
+        let htmlContent = isManualPasteMode ? MANUAL_PASTE_HTML : html;
         
         // HTML 구조 확인 및 보완
         const hasDoctype = htmlContent.trim().toLowerCase().startsWith('<!doctype');
@@ -1559,11 +1520,11 @@ const Step3PreEdit: React.FC<{
           console.warn('iframe write error (ignored):', error);
         }
         
-        // Translation.jsx의 handleStartPreEdit 로직과 동일하게
-        // 선택된 영역만 남기고 나머지 제거
+        // Translation.jsx의 handleStartPreEdit 로직: 선택된 영역만 남기고 나머지 제거 (수동 모드에서는 스킵)
         setTimeout(() => {
           if (iframeDoc.body) {
-            const selectedElementIds = new Set(selectedAreas.map(area => area.id));
+            if (!isManualPasteMode) {
+              const selectedElementIds = new Set(selectedAreas.map(area => area.id));
             console.log('🔍 선택된 요소 ID 목록:', Array.from(selectedElementIds));
             
             // 모든 data-transflow-id 속성을 가진 요소 찾기
@@ -1627,12 +1588,13 @@ const Step3PreEdit: React.FC<{
             console.log('✨ 최종 body 자식 요소:', iframeDoc.body.children.length, '개');
             console.log('📄 최종 HTML:', iframeDoc.body.innerHTML.substring(0, 500));
             
-            // 선택 표시 제거
-            iframeDoc.querySelectorAll('.transflow-selected, .transflow-hovering, .transflow-area-selected').forEach(el => {
-              (el as HTMLElement).classList.remove('transflow-selected', 'transflow-hovering', 'transflow-area-selected');
-            });
+              // 선택 표시 제거
+              iframeDoc.querySelectorAll('.transflow-selected, .transflow-hovering, .transflow-area-selected').forEach(el => {
+                (el as HTMLElement).classList.remove('transflow-selected', 'transflow-hovering', 'transflow-area-selected');
+              });
+            }
             
-            // 선택된 영역만 남은 HTML을 onHtmlChange로 저장
+            // 선택된 영역만 남은 HTML (또는 수동 모드에서는 전체)을 onHtmlChange로 저장
             const selectedOnlyHtml = iframeDoc.documentElement.outerHTML;
             console.log('💾 STEP 3 선택된 영역만 저장:', selectedOnlyHtml.substring(0, 200));
             
@@ -1712,6 +1674,21 @@ const Step3PreEdit: React.FC<{
                 }, 500);
               };
               iframeDoc.body.addEventListener('input', handleInput);
+              
+              // ⭐ 붙여넣기 시 웹에서 복사한 HTML 서식 유지
+              const handlePaste = (e: ClipboardEvent) => {
+                e.preventDefault();
+                const html = e.clipboardData?.getData('text/html');
+                const text = e.clipboardData?.getData('text/plain');
+                if (html) {
+                  iframeDoc.execCommand('insertHTML', false, html);
+                } else if (text) {
+                  iframeDoc.execCommand('insertText', false, text);
+                }
+                const updatedHtml = iframeDoc.documentElement.outerHTML;
+                onHtmlChange(updatedHtml);
+              };
+              iframeDoc.addEventListener('paste', handlePaste);
             } else {
               // 컴포넌트 편집 모드
               const allElements = iframeDoc.querySelectorAll('*');
@@ -1776,10 +1753,10 @@ const Step3PreEdit: React.FC<{
         }, 200);
       }
     }
-  }, [html, selectedAreas]); // mode와 onHtmlChange 제거! (초기 렌더링만 수행)
+  }, [html, selectedAreas, isManualPasteMode]); // mode와 onHtmlChange 제거! (초기 렌더링만 수행)
 
   const handleDelete = () => {
-    if (selectedElements.length > 0 && iframeRef.current && (mode === 'component' || mode === 'spacing')) {
+    if (selectedElements.length > 0 && iframeRef.current && mode === 'component') {
       const iframe = iframeRef.current;
       const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
       if (iframeDoc) {
@@ -1844,6 +1821,9 @@ const Step3PreEdit: React.FC<{
     return containerPatterns.some(pattern => pattern.test(className));
   };
 
+  // ⭐ 내부 서식 유지: margin/padding을 건드리지 않을 콘텐츠 요소 (인용구, 목록 등)
+  const CONTENT_PRESERVE_TAGS = new Set(['BLOCKQUOTE', 'UL', 'OL', 'PRE', 'FIGURE', 'FIGCAPTION', 'TABLE']);
+
   // 공백 제거 함수들
   const removeSpacing = (type: 'top' | 'bottom' | 'left' | 'right' | 'auto') => {
     if (!iframeRef.current) return;
@@ -1851,6 +1831,30 @@ const Step3PreEdit: React.FC<{
     const iframe = iframeRef.current;
     const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!iframeDoc || !iframeDoc.body) return;
+
+    // 수동 공백 제거 모드: 선택한 요소에 직접 margin/padding 0 적용
+    if (mode === 'spacing' && selectedElements.length > 0) {
+      const currentHtml = iframeDoc.documentElement.outerHTML;
+      if (spacingCurrentHtmlRef.current && spacingCurrentHtmlRef.current !== currentHtml) {
+        spacingUndoStackRef.current.push(spacingCurrentHtmlRef.current);
+        spacingRedoStackRef.current = [];
+      }
+      const dirs: Array<'top'|'bottom'|'left'|'right'> = type === 'auto' ? ['top','bottom','left','right'] : [type];
+      selectedElements.forEach(el => {
+        if (!iframeDoc.body?.contains(el)) return;
+        dirs.forEach(d => {
+          if (d === 'top') { el.style.marginTop = '0'; el.style.paddingTop = '0'; }
+          else if (d === 'bottom') { el.style.marginBottom = '0'; el.style.paddingBottom = '0'; }
+          else if (d === 'left') { el.style.marginLeft = '0'; el.style.paddingLeft = '0'; }
+          else if (d === 'right') { el.style.marginRight = '0'; el.style.paddingRight = '0'; }
+        });
+      });
+      const newHtml = iframeDoc.documentElement.outerHTML;
+      spacingCurrentHtmlRef.current = newHtml;
+      currentHtmlRef.current = newHtml;
+      onHtmlChange(newHtml);
+      return;
+    }
 
     // 🔍 디버깅: 버튼 클릭 전 HTML 및 스타일 정보 저장
     const beforeHtml = iframeDoc.documentElement.outerHTML;
@@ -1897,15 +1901,10 @@ const Step3PreEdit: React.FC<{
 
     // 공백 제거 모드일 때는 공백 제거 모드에서 선택한 요소만 사용
     // 전체 공백 제거 모드일 때는 Step 2에서 선택한 영역 사용
-    const allSelectedElements = mode === 'spacing' 
-      ? selectedElements  // 공백 제거 모드: 선택한 요소만
-      : mode === 'spacing-all'
-      ? selectedElementsFromStep2  // 전체 공백 제거 모드: Step 2 선택 영역
-      : selectedElementsFromStep2;  // 기본: Step 2 선택 영역
+    const allSelectedElements = selectedElementsFromStep2;  // Step 2 선택 영역에 전체 공백 제거 적용
 
     console.log('🔍 Step 2에서 선택된 요소 개수:', selectedElementsFromStep2.length);
-    console.log('🔍 공백 제거 모드에서 선택된 요소 개수:', mode === 'spacing' ? selectedElements.length : 0);
-    console.log('🔍 전체 공백 제거 모드:', mode === 'spacing-all' ? '활성화' : '비활성화');
+    console.log('🔍 전체 공백 제거 적용 대상:', allSelectedElements.length, '개');
     console.log('🔍 총 선택된 요소 개수:', allSelectedElements.length);
 
     // 기존 클래스 제거 (재적용을 위해)
@@ -1913,12 +1912,15 @@ const Step3PreEdit: React.FC<{
       el.classList.remove('transflow-spacing-parent');
     });
 
-    // 선택된 요소들의 부모 요소들에 클래스 추가
+    // 선택된 요소들의 부모 요소들에 클래스 추가 (단, blockquote·ul·ol 등 내부 서식 요소는 제외)
     const parentElementsList: HTMLElement[] = [];
     allSelectedElements.forEach((selectedEl) => {
       let parent = selectedEl.parentElement;
-      // body까지 올라가면서 부모 요소들에 클래스 추가
       while (parent && parent !== iframeDoc.body && parent !== iframeDoc.documentElement) {
+        if (CONTENT_PRESERVE_TAGS.has(parent.tagName)) {
+          parent = parent.parentElement;
+          continue;
+        }
         if (!parent.classList.contains('transflow-spacing-parent')) {
           parent.classList.add('transflow-spacing-parent');
           parentElementsList.push(parent as HTMLElement);
@@ -1926,6 +1928,17 @@ const Step3PreEdit: React.FC<{
         parent = parent.parentElement;
       }
     });
+
+    // 수동 붙여넣기 등 선택 영역 없을 때: body의 직계 레이아웃 자식만 처리
+    if (parentElementsList.length === 0 && iframeDoc.body) {
+      const layoutTags = new Set(['DIV', 'MAIN', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'ASIDE']);
+      Array.from(iframeDoc.body.children).forEach((child) => {
+        if (layoutTags.has(child.tagName) && !CONTENT_PRESERVE_TAGS.has(child.tagName)) {
+          (child as HTMLElement).classList.add('transflow-spacing-parent');
+          parentElementsList.push(child as HTMLElement);
+        }
+      });
+    }
 
     console.log('🔍 부모 요소 개수:', parentElementsList.length);
 
@@ -1950,19 +1963,24 @@ const Step3PreEdit: React.FC<{
     // 더 구체적인 선택자 사용 + body도 포함하여 외부 CSS와의 충돌 방지
     if (spacingRemovedRef.current.auto) {
       // 자동 모드면 모든 마진과 패딩 제거
-      rules.push('body { margin: 0 !important; padding: 0 !important; }');
-      rules.push('html body { margin: 0 !important; padding: 0 !important; }');
-      rules.push('.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; }');
-      rules.push('section.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; }');
-      rules.push('div.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; }');
-      rules.push('body section.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; }');
-      rules.push('body div.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; }');
+      rules.push('body { margin: 0 !important; margin-inline: 0 !important; padding: 0 !important; padding-inline: 0 !important; }');
+      rules.push('html body { margin: 0 !important; margin-inline: 0 !important; padding: 0 !important; padding-inline: 0 !important; }');
+      rules.push('.transflow-spacing-parent { margin: 0 !important; margin-inline: 0 !important; padding: 0 !important; padding-inline: 0 !important; max-width: 100% !important; }');
+      rules.push('section.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; padding-inline: 0 !important; max-width: 100% !important; }');
+      rules.push('div.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; padding-inline: 0 !important; max-width: 100% !important; }');
+      rules.push('body section.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; padding-inline: 0 !important; max-width: 100% !important; }');
+      rules.push('body div.transflow-spacing-parent { margin: 0 !important; padding: 0 !important; padding-inline: 0 !important; max-width: 100% !important; }');
       // 🔍 wrapper의 width와 max-width도 100%로 설정
       rules.push('.wrapper.transflow-spacing-parent { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; }');
       rules.push('.transflow-spacing-parent.wrapper { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; }');
-      // 🔍 선택된 요소(article)의 width와 margin도 제거
-      rules.push('[data-transflow-id] { margin: 0 !important; width: 100% !important; }');
-      rules.push('#contentPost article { margin: 0 !important; width: 100% !important; }');
+      // 🔍 선택된 요소(article)의 width와 margin 제거 (blockquote·ul·ol 등 내부 서식은 유지)
+      rules.push('[data-transflow-id]:not(blockquote):not(ul):not(ol):not(pre):not(figure):not(table) { margin: 0 !important; width: 100% !important; }');
+      rules.push('#contentPost article:not(blockquote) { margin: 0 !important; width: 100% !important; }');
+      // ⭐ 수동 붙여넣기: .transflow-spacing-parent 내부 article/section/main/div - margin·padding·padding-inline·margin-inline·max-width 제거 (우측 공백 제거)
+      rules.push('.transflow-spacing-parent article { margin: 0 !important; margin-inline: 0 !important; padding: 0 !important; padding-inline: 0 !important; width: 100% !important; max-width: 100% !important; }');
+      rules.push('.transflow-spacing-parent section { margin: 0 !important; margin-inline: 0 !important; padding: 0 !important; padding-inline: 0 !important; max-width: 100% !important; }');
+      rules.push('.transflow-spacing-parent main { margin: 0 !important; margin-inline: 0 !important; padding: 0 !important; padding-inline: 0 !important; max-width: 100% !important; }');
+      rules.push('.transflow-spacing-parent div { margin: 0 !important; margin-inline: 0 !important; padding: 0 !important; padding-inline: 0 !important; max-width: 100% !important; }');
     } else {
       // 개별 모드면 각각 적용
       if (spacingRemovedRef.current.top) {
@@ -1995,9 +2013,9 @@ const Step3PreEdit: React.FC<{
         // 🔍 wrapper의 width도 100%로 설정
         rules.push('.wrapper.transflow-spacing-parent { width: 100% !important; margin-left: 0 !important; }');
         rules.push('.transflow-spacing-parent.wrapper { width: 100% !important; margin-left: 0 !important; }');
-        // 🔍 선택된 요소(article)의 margin-left도 제거
-        rules.push('[data-transflow-id] { margin-left: 0 !important; }');
-        rules.push('#contentPost article { margin-left: 0 !important; }');
+        // 🔍 선택된 요소의 margin-left 제거 (blockquote 등 내부 서식 유지)
+        rules.push('[data-transflow-id]:not(blockquote):not(ul):not(ol):not(pre):not(figure):not(table) { margin-left: 0 !important; }');
+        rules.push('#contentPost article:not(blockquote) { margin-left: 0 !important; }');
       }
       if (spacingRemovedRef.current.right) {
         // 🔍 오른쪽 공백: padding과 margin 모두 제거 + body 포함
@@ -2011,9 +2029,9 @@ const Step3PreEdit: React.FC<{
         // 🔍 wrapper의 width와 max-width도 100%로 설정
         rules.push('.wrapper.transflow-spacing-parent { width: 100% !important; max-width: 100% !important; margin-right: 0 !important; }');
         rules.push('.transflow-spacing-parent.wrapper { width: 100% !important; max-width: 100% !important; margin-right: 0 !important; }');
-        // 🔍 선택된 요소(article)의 width와 margin도 제거
-        rules.push('[data-transflow-id] { margin-right: 0 !important; margin-left: 0 !important; width: 100% !important; }');
-        rules.push('#contentPost article { margin-right: 0 !important; margin-left: 0 !important; width: 100% !important; }');
+        // 🔍 선택된 요소의 width·margin 제거 (blockquote 등 내부 서식 유지)
+        rules.push('[data-transflow-id]:not(blockquote):not(ul):not(ol):not(pre):not(figure):not(table) { margin-right: 0 !important; margin-left: 0 !important; width: 100% !important; }');
+        rules.push('#contentPost article:not(blockquote) { margin-right: 0 !important; margin-left: 0 !important; width: 100% !important; }');
       }
     }
 
@@ -2123,9 +2141,11 @@ const Step3PreEdit: React.FC<{
       }
     });
 
-    // 선택된 요소 자체 처리
+    // 선택된 요소 자체 처리 (blockquote, ul, ol 등 내부 서식 요소는 제외)
     allSelectedElements.forEach((selectedEl) => {
       const el = selectedEl as HTMLElement;
+      if (CONTENT_PRESERVE_TAGS.has(el.tagName)) return;
+
       const computed = iframeDoc.defaultView?.getComputedStyle(el);
       if (!computed) return;
 
@@ -2155,6 +2175,31 @@ const Step3PreEdit: React.FC<{
         el.style.marginRight = '0';
       }
     });
+
+    // ⭐ margin:auto + max-width로 인한 왼쪽 공백 제거 (수동 붙여넣기 시 entry-header, entry-content 등)
+    if (type === 'auto') {
+      const skipTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY', ...CONTENT_PRESERVE_TAGS]);
+      const layoutElements = iframeDoc.querySelectorAll('header, div, section, article, main, aside, footer');
+      layoutElements.forEach((el) => {
+        if (skipTags.has(el.tagName)) return;
+        const htmlEl = el as HTMLElement;
+        const computed = iframeDoc.defaultView?.getComputedStyle(htmlEl);
+        if (!computed) return;
+        const ml = computed.marginLeft;
+        const mr = computed.marginRight;
+        const mw = computed.maxWidth;
+        const hasMarginAuto = ml === 'auto' || mr === 'auto';
+        const hasNarrowMaxWidth = mw && mw !== 'none' && parseFloat(mw) > 0 && parseFloat(mw) < 2000;
+        if (hasMarginAuto) {
+          htmlEl.style.marginLeft = '0';
+          htmlEl.style.marginRight = '0';
+        }
+        if (hasNarrowMaxWidth) {
+          htmlEl.style.maxWidth = '100%';
+          htmlEl.style.width = '100%';
+        }
+      });
+    }
 
     // 🔍 디버깅: 버튼 클릭 후 HTML 및 스타일 정보
     setTimeout(() => {
@@ -2226,6 +2271,72 @@ const Step3PreEdit: React.FC<{
     // ⭐ 공백 제거 undo stack도 업데이트
     spacingCurrentHtmlRef.current = updatedHtml;
     onHtmlChange(updatedHtml);
+  };
+
+  // 불필요한 그리드 제거 (2열 이상 그리드인데 자식이 1개뿐인 경우 → 1열로 변환)
+  // 소스(style/class) + computed style 모두 검사하여 viewport/브라우저 영향 최소화
+  const removeUnnecessaryGrids = () => {
+    if (!iframeRef.current) return;
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc || !iframeDoc.body) return;
+
+    const currentHtml = iframeDoc.documentElement.outerHTML;
+    if (spacingCurrentHtmlRef.current && spacingCurrentHtmlRef.current !== currentHtml) {
+      spacingUndoStackRef.current.push(spacingCurrentHtmlRef.current);
+      spacingRedoStackRef.current = [];
+    }
+
+    const countGridColumns = (gtc: string): number => {
+      if (!gtc || gtc === 'none') return 0;
+      const repeatMatch = gtc.match(/repeat\s*\(\s*(\d+)/);
+      if (repeatMatch) return parseInt(repeatMatch[1], 10);
+      const parts = gtc.split(/[\s,]+/).filter(Boolean);
+      return parts.length >= 2 ? parts.length : 0;
+    };
+
+    const hasMultiColFromSource = (el: HTMLElement): number => {
+      const styleVal = el.style.gridTemplateColumns || el.getAttribute('style') || '';
+      const styleCols = countGridColumns(styleVal);
+      if (styleCols >= 2) return styleCols;
+      const cls = (el.className || '').toString();
+      const gridColsMatch = cls.match(/(?:sm|md|lg|xl|2xl)?:?grid-cols-(\d+)/);
+      if (gridColsMatch) {
+        const n = parseInt(gridColsMatch[1], 10);
+        if (n >= 2) return n;
+      }
+      return 0;
+    };
+
+    let fixedCount = 0;
+    const walk = (root: Element) => {
+      const children = Array.from(root.children);
+      for (const el of children) {
+        const htmlEl = el as HTMLElement;
+        if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'HTML', 'HEAD', 'BODY'].includes(htmlEl.tagName)) continue;
+        const childCount = htmlEl.children.length;
+        let cols = 0;
+        const sourceCols = hasMultiColFromSource(htmlEl);
+        if (sourceCols >= 2) {
+          cols = sourceCols;
+        } else {
+          const computed = iframeDoc.defaultView?.getComputedStyle(htmlEl);
+          if (computed?.display === 'grid') cols = countGridColumns(computed.gridTemplateColumns);
+        }
+        if (cols >= 2 && childCount < cols) {
+          htmlEl.style.setProperty('grid-template-columns', '1fr', 'important');
+          fixedCount++;
+        }
+        walk(htmlEl);
+      }
+    };
+    walk(iframeDoc.body);
+
+    const updatedHtml = iframeDoc.documentElement.outerHTML;
+    spacingCurrentHtmlRef.current = updatedHtml;
+    currentHtmlRef.current = updatedHtml;
+    onHtmlChange(updatedHtml);
+    console.log('✅ 불필요한 그리드 제거 완료:', fixedCount, '개 수정');
   };
 
   // HTML 파일 다운로드 함수
@@ -2300,20 +2411,6 @@ const Step3PreEdit: React.FC<{
             >
               컴포넌트 편집
             </Button>
-            <Button
-              variant={mode === 'spacing' ? 'primary' : 'secondary'}
-              onClick={() => setMode('spacing')}
-              style={{ fontSize: '12px', padding: '4px 8px' }}
-            >
-              공백 제거
-            </Button>
-            <Button
-              variant={mode === 'spacing-all' ? 'primary' : 'secondary'}
-              onClick={() => setMode('spacing-all')}
-              style={{ fontSize: '12px', padding: '4px 8px' }}
-            >
-              전체 공백 제거
-            </Button>
           </div>
           <div style={{ borderLeft: '1px solid #C0C0C0', height: '24px', margin: '0 4px' }} />
           <div style={{ display: 'flex', gap: '4px' }}>
@@ -2325,9 +2422,8 @@ const Step3PreEdit: React.FC<{
                 if (!iframeDoc) return;
 
                 // ⭐ 모드에 따라 다른 undo 동작
-                if (mode === 'spacing' || mode === 'spacing-all') {
-                  // 공백 제거 모드: 공백 제거 undo stack 사용
-                  if (spacingUndoStackRef.current.length > 0) {
+                if (spacingUndoStackRef.current.length > 0) {
+                  // 공백 제거 undo: 전체 공백 제거 실행 취소
                     // 현재 상태를 redo stack에 저장
                     const currentHtml = iframeDoc.documentElement.outerHTML;
                     spacingRedoStackRef.current.push(currentHtml);
@@ -2351,9 +2447,6 @@ const Step3PreEdit: React.FC<{
                     }, 0);
                     
                     console.log('↶ 공백 제거 실행 취소 완료. 남은 undo:', spacingUndoStackRef.current.length);
-                  } else {
-                    console.log('⚠️ 공백 제거 undo stack이 비어있습니다');
-                  }
                 } else if (mode === 'component') {
                   // 컴포넌트 편집 모드: 컴포넌트 편집 undo stack 사용
                   if (undoStackRef.current.length > 0) {
@@ -2485,9 +2578,8 @@ const Step3PreEdit: React.FC<{
                 if (!iframeDoc) return;
 
                 // ⭐ 모드에 따라 다른 redo 동작
-                if (mode === 'spacing' || mode === 'spacing-all') {
-                  // 공백 제거 모드: 공백 제거 redo stack 사용
-                  if (spacingRedoStackRef.current.length > 0) {
+                if (spacingRedoStackRef.current.length > 0) {
+                  // 공백 제거 redo: 전체 공백 제거 다시 실행
                     // 현재 상태를 undo stack에 저장
                     const currentHtml = iframeDoc.documentElement.outerHTML;
                     spacingUndoStackRef.current.push(currentHtml);
@@ -2511,9 +2603,6 @@ const Step3PreEdit: React.FC<{
                     }, 0);
                     
                     console.log('↷ 공백 제거 다시 실행 완료. 남은 redo:', spacingRedoStackRef.current.length);
-                  } else {
-                    console.log('⚠️ 공백 제거 redo stack이 비어있습니다');
-                  }
                 } else if (mode === 'component') {
                   // 컴포넌트 편집 모드: 컴포넌트 편집 redo stack 사용
                   if (redoStackRef.current.length > 0) {
@@ -2638,55 +2727,54 @@ const Step3PreEdit: React.FC<{
               ↷ 다시 실행
             </Button>
           </div>
-          {(mode === 'spacing' || mode === 'spacing-all') && (
-            <>
-              <div style={{ borderLeft: '1px solid #C0C0C0', height: '24px', margin: '0 4px' }} />
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: '#696969', marginRight: '4px' }}>
-                  공백 제거:
-                </span>
-                <Button
-                  variant="secondary"
-                  onClick={() => removeSpacing('top')}
-                  style={{ fontSize: '12px', padding: '4px 8px' }}
-                >
-                  ↑ 윗 공백 제거
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => removeSpacing('bottom')}
-                  style={{ fontSize: '12px', padding: '4px 8px' }}
-                >
-                  ↓ 아래 공백 제거
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => removeSpacing('left')}
-                  style={{ fontSize: '12px', padding: '4px 8px' }}
-                >
-                  ← 왼쪽 공백 제거
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => removeSpacing('right')}
-                  style={{ fontSize: '12px', padding: '4px 8px' }}
-                >
-                  → 오른쪽 공백 제거
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={() => removeSpacing('auto')}
-                  style={{ fontSize: '12px', padding: '4px 8px' }}
-                >
-                  ✨ 자동으로 불필요한 공간 제거
-                </Button>
-              </div>
-            </>
-          )}
           <div style={{ borderLeft: '1px solid #C0C0C0', height: '24px', margin: '0 4px' }} />
           <div style={{ display: 'flex', gap: '4px' }}>
             <Button
-              variant="secondary"
+              variant={mode === 'spacing' ? 'primary' : 'secondary'}
+              onClick={() => setMode('spacing')}
+              style={{ fontSize: '12px', padding: '4px 8px' }}
+            >
+              수동 공백 제거
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => removeSpacing('auto')}
+              style={{ fontSize: '12px', padding: '4px 8px' }}
+            >
+              전체 공백 제거
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => removeUnnecessaryGrids()}
+              style={{ fontSize: '12px', padding: '4px 8px' }}
+            >
+              불필요한 그리드 제거
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                  const iframe = iframeRef.current;
+                  const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
+                  if (iframeDoc) {
+                    iframeDoc.open();
+                    iframeDoc.write(MANUAL_PASTE_HTML);
+                    iframeDoc.close();
+                    const updatedHtml = iframeDoc.documentElement.outerHTML;
+                    currentHtmlRef.current = updatedHtml;
+                    onHtmlChange(updatedHtml);
+                    setTimeout(() => {
+                      const div = iframeDoc.querySelector('[contenteditable="true"]') as HTMLElement;
+                      if (div) div.focus();
+                    }, 50);
+                  }
+                  onClearForManualPaste?.();
+                }}
+              style={{ fontSize: '12px', padding: '4px 8px' }}
+            >
+              수동 서식 넣기
+            </Button>
+            <Button
+              variant="primary"
               onClick={downloadHtml}
               style={{ fontSize: '12px', padding: '4px 8px' }}
             >
@@ -2694,6 +2782,40 @@ const Step3PreEdit: React.FC<{
             </Button>
           </div>
         </div>
+
+        {mode === 'spacing' && (() => {
+          const first = selectedElements[0];
+          const iframeDoc = iframeRef.current?.contentDocument || iframeRef.current?.contentWindow?.document;
+          let top = 0, bottom = 0, left = 0, right = 0;
+          if (first && iframeDoc?.body?.contains(first)) {
+            const c = iframeDoc.defaultView?.getComputedStyle(first);
+            if (c) {
+              top = (parseFloat(c.marginTop) || 0) + (parseFloat(c.paddingTop) || 0);
+              bottom = (parseFloat(c.marginBottom) || 0) + (parseFloat(c.paddingBottom) || 0);
+              left = (parseFloat(c.marginLeft) || 0) + (parseFloat(c.paddingLeft) || 0);
+              right = (parseFloat(c.marginRight) || 0) + (parseFloat(c.paddingRight) || 0);
+            }
+          }
+          return (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12px', color: '#696969', marginRight: '4px' }}>
+                {selectedElements.length}개 선택됨
+              </span>
+              {selectedElements.length > 0 && (
+                <>
+                  <span style={{ fontSize: '12px', color: '#333' }}>윗 여백: {top}px</span>
+                  <span style={{ fontSize: '12px', color: '#333' }}>아래 여백: {bottom}px</span>
+                  <span style={{ fontSize: '12px', color: '#333' }}>왼쪽 여백: {left}px</span>
+                  <span style={{ fontSize: '12px', color: '#333' }}>우측 여백: {right}px</span>
+                  <Button variant="secondary" onClick={() => removeSpacing('top')} style={{ fontSize: '11px', padding: '2px 6px' }}>윗 공백 제거</Button>
+                  <Button variant="secondary" onClick={() => removeSpacing('bottom')} style={{ fontSize: '11px', padding: '2px 6px' }}>아래 공백 제거</Button>
+                  <Button variant="secondary" onClick={() => removeSpacing('left')} style={{ fontSize: '11px', padding: '2px 6px' }}>왼쪽 공백 제거</Button>
+                  <Button variant="secondary" onClick={() => removeSpacing('right')} style={{ fontSize: '11px', padding: '2px 6px' }}>우측 공백 제거</Button>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {mode === 'component' && (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -2731,51 +2853,6 @@ const Step3PreEdit: React.FC<{
                 >
                   삭제
                 </Button>
-          </div>
-        )}
-        {mode === 'spacing' && (
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-            <span style={{ fontSize: '12px', color: '#696969', marginRight: '4px' }}>
-              {selectedElements.length}개 선택됨
-            </span>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                if (!iframeRef.current) return;
-                const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
-                if (iframeDoc) {
-                  selectedElements.forEach(el => {
-                    el.classList.remove('component-selected');
-                    el.style.outline = '';
-                    el.style.boxShadow = '';
-                    el.style.backgroundColor = '';
-                    el.style.outlineOffset = '';
-                  });
-                }
-                setSelectedElements([]);
-              }}
-              disabled={selectedElements.length === 0}
-              style={{ fontSize: '12px', padding: '4px 8px' }}
-              title="전체 선택 취소"
-            >
-              선택 취소
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleDelete}
-              disabled={selectedElements.length === 0}
-              style={{ fontSize: '12px', padding: '4px 8px' }}
-              title={`${selectedElements.length}개 요소 삭제`}
-            >
-              삭제
-            </Button>
-          </div>
-        )}
-        {mode === 'spacing-all' && (
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-            <span style={{ fontSize: '12px', color: '#696969', marginRight: '4px' }}>
-              Step 2에서 선택한 영역 전체
-            </span>
           </div>
         )}
       </div>
@@ -5291,6 +5368,7 @@ const NewTranslation: React.FC = () => {
   const { user } = useUser();
   const { setIsCollapsed } = useSidebar();
   const [currentStep, setCurrentStep] = useState(1);
+  const [isManualPasteMode, setIsManualPasteMode] = useState(false);
   
   // ⭐ localStorage에서 draft 복원 (뒤로가기 대응)
   const loadDraftFromStorage = (): TranslationDraft | null => {
@@ -5341,6 +5419,8 @@ const NewTranslation: React.FC = () => {
   const step6Ref = React.useRef<{ handleDraftSave: () => void; handlePublish: () => void } | null>(null);
   // Step 5용 패널 접기/펼치기 상태
   const [step5CollapsedPanels, setStep5CollapsedPanels] = useState<Set<string>>(new Set());
+  const [showUrlModal, setShowUrlModal] = useState(false);
+  const [urlModalInput, setUrlModalInput] = useState('');
 
   const userRole = useMemo(() => {
     if (!user) return null;
@@ -5522,6 +5602,7 @@ const NewTranslation: React.FC = () => {
           selectedAreas: [], // ⭐ 새로 크롤링하면 선택 영역 초기화
           originalHtmlWithIds: '', // ⭐ 이전 HTML with IDs도 초기화
         }));
+        setIsManualPasteMode(false);
         setCurrentStep(2);
       } else {
         setSaveError(response.errorMessage || '페이지 로드 중 오류가 발생했습니다.');
@@ -5543,6 +5624,19 @@ const NewTranslation: React.FC = () => {
       ...prev,
       selectedAreas: [...prev.selectedAreas, area],
     }));
+  };
+
+  const handleManualPaste = () => {
+    setDraft({
+      url: draft.url,
+      selectedAreas: [],
+      originalHtml: MANUAL_PASTE_HTML,
+      originalHtmlWithIds: MANUAL_PASTE_HTML,
+      editedHtml: '',
+      state: DocumentState.DRAFT,
+    });
+    setIsManualPasteMode(true);
+    setCurrentStep(3);
   };
 
   const handleAreaRemove = (id: string) => {
@@ -5630,17 +5724,20 @@ const NewTranslation: React.FC = () => {
         }
       }
       
-      // STEP 3에서 STEP 4로 넘어갈 때 iframe HTML 저장 (선택된 영역만)
+      // STEP 3에서 STEP 4로 넘어갈 때: 원문 URL이 비어있으면 모달로 입력받기
       if (currentStep === 3) {
+        if (!draft.url?.trim()) {
+          setUrlModalInput('');
+          setShowUrlModal(true);
+          return;
+        }
         console.log('💾 STEP 3 → STEP 4: 편집된 HTML 저장 중...');
-        // draft.editedHtml이 onHtmlChange로 이미 저장되어 있어야 함
         if (!draft.editedHtml) {
           console.warn('⚠️ draft.editedHtml이 없습니다. STEP 3에서 편집 내용이 저장되지 않았을 수 있습니다.');
         } else {
           console.log('✅ draft.editedHtml 확인:', draft.editedHtml.substring(0, 200));
         }
-        // STEP 3에서도 자동 저장 (다음 누를 때)
-        setHasUnsavedChanges(false); // 저장 완료 표시
+        setHasUnsavedChanges(false);
       }
       
       // STEP 4: 번역 실행 확인
@@ -5659,6 +5756,26 @@ const NewTranslation: React.FC = () => {
     }
   };
 
+  const handleUrlModalConfirm = async () => {
+    const url = urlModalInput?.trim() || '';
+    if (!url) {
+      alert('원문 URL을 입력해주세요.');
+      return;
+    }
+    try {
+      new URL(url);
+    } catch {
+      alert('올바른 URL 형식이 아닙니다. (예: https://example.com)');
+      return;
+    }
+    setDraft(prev => ({ ...prev, url }));
+    setShowUrlModal(false);
+    setUrlModalInput('');
+    setHasUnsavedChanges(false);
+    await handleSaveDraft(undefined, true, { url });
+    setCurrentStep(currentStep + 1);
+  };
+
   const handlePrev = () => {
     if (currentStep > 1) {
       if (hasUnsavedChanges && !lastSaved) {
@@ -5667,8 +5784,21 @@ const NewTranslation: React.FC = () => {
         }
       }
       
-      // Step 3에서 Step 2로 돌아갈 때 선택 영역 초기화
+      // Step 3에서 돌아갈 때
       if (currentStep === 3) {
+        if (isManualPasteMode) {
+          // 수동 모드: Step 1로
+          setIsManualPasteMode(false);
+          setDraft(prev => ({
+            ...prev,
+            selectedAreas: [],
+            originalHtml: '',
+            originalHtmlWithIds: '',
+            editedHtml: '',
+          }));
+          setCurrentStep(1);
+          return;
+        }
         setDraft(prev => ({
           ...prev,
           selectedAreas: [],
@@ -5826,13 +5956,13 @@ const NewTranslation: React.FC = () => {
     }
   };
 
-  const handleSaveDraft = async (step6Data?: { title?: string; categoryId?: number; estimatedLength?: number }, isAutoSave: boolean = false) => {
+  const handleSaveDraft = async (step6Data?: { title?: string; categoryId?: number; estimatedLength?: number }, isAutoSave: boolean = false, draftOverrides?: { url?: string }) => {
     try {
-      // draft 상태와 currentStep을 JSON으로 저장
+      const urlToUse = draftOverrides?.url ?? draft.url;
       const draftData = JSON.stringify({
         currentStep,
         draft: {
-          url: draft.url,
+          url: urlToUse,
           selectedAreas: draft.selectedAreas,
           originalHtml: draft.originalHtml,
           originalHtmlWithIds: draft.originalHtmlWithIds,
@@ -5853,7 +5983,7 @@ const NewTranslation: React.FC = () => {
         // 문서가 없으면 먼저 생성 (버전은 생성하지 않음 - Step 6에서만 생성)
         const response = await documentApi.createDocument({
           title: documentTitle,
-          originalUrl: draft.url,
+          originalUrl: urlToUse || 'https://manual-paste.local',
           sourceLang: draft.sourceLang || 'auto',
           targetLang: draft.targetLang || 'ko',
           status: 'DRAFT',
@@ -5913,6 +6043,7 @@ const NewTranslation: React.FC = () => {
             url={draft.url}
             setUrl={(url) => setDraft((prev) => ({ ...prev, url }))}
             onExecute={handleCrawling}
+            onManualPaste={handleManualPaste}
             isLoading={isLoading}
             loadingProgress={loadingProgress}
             draftDocuments={draftDocuments}
@@ -5945,6 +6076,8 @@ const NewTranslation: React.FC = () => {
             html={draft.editedHtml || draft.originalHtmlWithIds || draft.originalHtml}
             onHtmlChange={(html) => setDraft((prev) => ({ ...prev, editedHtml: html }))}
             selectedAreas={draft.selectedAreas}
+            isManualPasteMode={isManualPasteMode}
+            onClearForManualPaste={() => {}}
           />
         );
       case 4:
@@ -6224,6 +6357,32 @@ const NewTranslation: React.FC = () => {
           )}
         </div>
       </div>
+
+      <Modal
+        isOpen={showUrlModal}
+        onClose={() => { setShowUrlModal(false); setUrlModalInput(''); }}
+        title="원문 URL 입력"
+        onConfirm={handleUrlModalConfirm}
+        confirmText="확인"
+        cancelText="취소"
+      >
+        <p style={{ marginBottom: '12px', fontSize: '14px' }}>임시저장을 위해 원문 URL을 입력해주세요.</p>
+        <input
+          type="text"
+          value={urlModalInput}
+          onChange={(e) => setUrlModalInput(e.target.value)}
+          placeholder="https://example.com"
+          style={{
+            width: '100%',
+            padding: '8px 12px',
+            fontSize: '14px',
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            boxSizing: 'border-box',
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleUrlModalConfirm(); }}
+        />
+      </Modal>
     </div>
   );
 };
