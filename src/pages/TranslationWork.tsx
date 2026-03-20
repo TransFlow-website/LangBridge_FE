@@ -14,7 +14,7 @@ import {
   Paragraph,
 } from '../utils/paragraphUtils';
 import ErrorBoundary from '../components/ErrorBoundary';
-import { AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Palette, Quote, Minus, Link2, Highlighter, Image, Table, Code, Superscript, Subscript, MoreVertical, Undo2, Redo2 } from 'lucide-react';
+import { AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Palette, Quote, Minus, Link2, Highlighter, Image, Table, Code, Superscript, Subscript, MoreVertical, Undo2, Redo2 } from 'lucide-react';
 import './TranslationWork.css';
 
 export default function TranslationWork() {
@@ -1844,6 +1844,37 @@ export default function TranslationWork() {
                               >
                                 S
                               </button>
+
+                              <button
+                                onClick={() => {
+                                  const iframeDoc = myTranslationIframeRef.current?.contentDocument;
+                                  if (!iframeDoc) return;
+                                  iframeDoc.execCommand('removeFormat', false);
+                                  // removeFormat이 border-style:solid 만 남기는 문제 수정
+                                  setTimeout(() => {
+                                    iframeDoc.querySelectorAll('*').forEach((el) => {
+                                      const htmlEl = el as HTMLElement;
+                                      if (htmlEl.style && htmlEl.style.borderStyle === 'solid' && !htmlEl.style.borderWidth) {
+                                        htmlEl.style.borderWidth = '0';
+                                      }
+                                    });
+                                  }, 0);
+                                }}
+                                style={{
+                                  padding: '4px 8px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  border: '1px solid #A9A9A9',
+                                  borderRadius: '3px',
+                                  backgroundColor: '#FFFFFF',
+                                  color: '#000000',
+                                  cursor: 'pointer',
+                                }}
+                                title="서식 지우기 (선택 영역)"
+                              >
+                                서식 지우기
+                              </button>
+
                               <div style={{ width: '1px', height: '20px', backgroundColor: '#C0C0C0', margin: '0 4px' }} />
                               <select
                                 onChange={(e) => {
@@ -2159,6 +2190,29 @@ export default function TranslationWork() {
                               >
                                 <AlignRight size={16} />
                               </button>
+
+                              <button
+                                onClick={() => {
+                                  const iframeDoc = myTranslationIframeRef.current?.contentDocument;
+                                  if (iframeDoc) iframeDoc.execCommand('justifyFull', false);
+                                }}
+                                style={{
+                                  padding: '4px 8px',
+                                  fontSize: '11px',
+                                  border: '1px solid #A9A9A9',
+                                  borderRadius: '3px',
+                                  backgroundColor: '#FFFFFF',
+                                  color: '#000000',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                                title="양쪽 정렬"
+                              >
+                                <AlignJustify size={16} />
+                              </button>
+
                               <div style={{ width: '1px', height: '20px', backgroundColor: '#C0C0C0', margin: '0 4px' }} />
                               <button
                                 onClick={() => {

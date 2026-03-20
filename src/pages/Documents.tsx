@@ -508,7 +508,7 @@ export default function Documents() {
     }
   };
 
-  const truncateUrl = (url: string, maxLen: number = 32) => {
+  const truncateUrl = (url: string, maxLen: number = 24) => {
     if (!url || !url.trim()) return '';
     const u = url.trim();
     return u.length <= maxLen ? u : u.slice(0, maxLen) + '…';
@@ -558,7 +558,7 @@ export default function Documents() {
     {
       key: 'title',
       label: '문서 제목',
-      width: 'minmax(0, 2fr)',
+      width: 'minmax(0, 3fr)',
       render: (item) => {
         if ((item as RowItem).isLoadingRow) {
           return <span style={{ paddingLeft: 24, color: colors.secondaryText, fontSize: '12px' }}>{item.title}</span>;
@@ -615,9 +615,12 @@ export default function Documents() {
                 color: isDraftOnly && !item.isCopyRow ? '#999' : '#000000',
                 fontStyle: isDraftOnly && !item.isCopyRow ? 'italic' : 'normal',
                 minWidth: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                flex: '1 1 auto',
+                whiteSpace: 'normal',
+                overflow: 'visible',
+                display: 'block',
+                lineHeight: 1.2,
+                wordBreak: 'break-word',
               }}
               title={item.title}
             >
@@ -633,7 +636,7 @@ export default function Documents() {
     {
       key: 'originalUrl',
       label: '원문 URL',
-      width: 'minmax(0, 1.5fr)',
+      width: 'minmax(0, 1fr)',
       render: (item) => {
         if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
         const url = item.originalUrl?.trim();
@@ -655,7 +658,7 @@ export default function Documents() {
               whiteSpace: 'nowrap',
             }}
           >
-            {truncateUrl(url, 32)}
+            {truncateUrl(url, 24)}
           </a>
         );
       },

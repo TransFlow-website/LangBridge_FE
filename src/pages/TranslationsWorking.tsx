@@ -214,7 +214,7 @@ export default function TranslationsWorking() {
     return statusMap[status] || status;
   };
 
-  const truncateUrl = (url: string, maxLen: number = 42) => {
+  const truncateUrl = (url: string, maxLen: number = 24) => {
     if (!url || !url.trim()) return '';
     const u = url.trim();
     return u.length <= maxLen ? u : u.slice(0, maxLen) + '…';
@@ -224,9 +224,21 @@ export default function TranslationsWorking() {
     {
       key: 'title',
       label: '문서 제목',
-      width: 'minmax(0, 2fr)',
+      width: 'minmax(0, 3fr)',
       render: (item) => (
-        <span style={{ fontWeight: 500, color: '#000000', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }} title={item.title}>
+        <span
+          style={{
+            fontWeight: 500,
+            color: '#000000',
+            minWidth: 0,
+            whiteSpace: 'normal',
+            overflow: 'visible',
+            display: 'block',
+            lineHeight: 1.2,
+            wordBreak: 'break-word',
+          }}
+          title={item.title}
+        >
           {item.title}
         </span>
       ),
@@ -234,13 +246,13 @@ export default function TranslationsWorking() {
     {
       key: 'originalUrl',
       label: '원문 URL',
-      width: 'minmax(0, 1.5fr)',
+      width: 'minmax(0, 1fr)',
       render: (item) => {
         const url = item.originalUrl?.trim();
         if (!url) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
         return (
           <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }} title={url}>
-            {truncateUrl(url, 32)}
+            {truncateUrl(url, 24)}
           </a>
         );
       },
