@@ -5,12 +5,12 @@
 
 export const colors = {
   // Base Color Palette (그레이스케일 시스템)
-  primaryBackground: '#DCDCDC', // 앱 전체 배경 (gainsboro)
+  primaryBackground: '#FFFFFF', // 앱 전체 배경 (흰색)
   sidebarBackground: '#D3D3D3', // 사이드바 배경 (lightgray)
   surface: '#FFFFFF', // Card 배경 (흰색)
   border: '#C0C0C0', // Border / Divider / Inactive UI (silver)
-  secondaryText: '#808080', // Secondary Text / Muted Icon (gray)
-  primaryText: '#696969', // Primary Text (dimgray)
+  secondaryText: '#666666', // Secondary Text / Muted Icon
+  primaryText: '#333333', // Primary Text (dark)
   accent: '#A9A9A9', // Active / Focus only (darkgray)
 } as const;
 

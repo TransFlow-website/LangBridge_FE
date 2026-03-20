@@ -37,6 +37,11 @@ export default function SystemSettings() {
   const [newCategoryDescription, setNewCategoryDescription] = useState('');
   const [addCategoryLoading, setAddCategoryLoading] = useState(false);
   const [deletingCategoryId, setDeletingCategoryId] = useState<number | null>(null);
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [editCategoryCode, setEditCategoryCode] = useState('');
+  const [editCategoryName, setEditCategoryName] = useState('');
+  const [editCategoryDescription, setEditCategoryDescription] = useState('');
+  const [updatingCategoryId, setUpdatingCategoryId] = useState<number | null>(null);
 
   // 유저 관리 관련 상태
   const [users, setUsers] = useState<UserListItem[]>([]);
@@ -285,6 +290,46 @@ export default function SystemSettings() {
       alert(error.response?.data?.message || '카테고리 삭제에 실패했습니다.');
     } finally {
       setDeletingCategoryId(null);
+    }
+  };
+
+  const handleStartEditCategory = (category: CategoryResponse) => {
+    setEditingCategoryId(category.id);
+    setEditCategoryCode(category.code ?? '');
+    setEditCategoryName(category.name);
+    setEditCategoryDescription(category.description ?? '');
+  };
+
+  const handleCancelEditCategory = () => {
+    setEditingCategoryId(null);
+    setEditCategoryCode('');
+    setEditCategoryName('');
+    setEditCategoryDescription('');
+  };
+
+  const handleUpdateCategory = async (categoryId: number) => {
+    if (!editCategoryCode.trim()) {
+      alert('카테고리 코드를 입력해주세요.');
+      return;
+    }
+    if (!editCategoryName.trim()) {
+      alert('카테고리 이름을 입력해주세요.');
+      return;
+    }
+    try {
+      setUpdatingCategoryId(categoryId);
+      await categoryApi.updateCategory(categoryId, {
+        code: editCategoryCode.trim(),
+        name: editCategoryName.trim(),
+        description: editCategoryDescription.trim() || undefined,
+      });
+      await fetchCategories();
+      handleCancelEditCategory();
+    } catch (error: any) {
+      console.error('카테고리 수정 실패:', error);
+      alert(error.response?.data?.message || '카테고리 수정에 실패했습니다.');
+    } finally {
+      setUpdatingCategoryId(null);
     }
   };
 
@@ -813,52 +858,124 @@ export default function SystemSettings() {
                   <div
                     key={category.id}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
                       padding: '16px',
                       border: `1px solid ${colors.border}`,
                       borderRadius: '6px',
                       backgroundColor: '#ffffff',
                     }}
                   >
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '12px', color: colors.secondaryText, marginBottom: '2px' }}>
-                        {category.code ?? category.name}
-                      </div>
-                      <div style={{ fontSize: '15px', fontWeight: 600, marginBottom: '4px' }}>
-                        {category.name}
-                      </div>
-                      {category.description && (
-                        <div style={{ fontSize: '13px', color: colors.secondaryText }}>
-                          {category.description}
+                    {editingCategoryId === category.id ? (
+                      /* 편집 모드 */
+                      <div>
+                        <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                          <div style={{ flex: '1', minWidth: '140px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, marginBottom: '4px', color: colors.primaryText }}>
+                              코드 *
+                            </label>
+                            <input
+                              type="text"
+                              value={editCategoryCode}
+                              onChange={(e) => setEditCategoryCode(e.target.value)}
+                              style={{ width: '100%', padding: '7px 10px', fontSize: '13px', border: `1px solid ${colors.border}`, borderRadius: '4px', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div style={{ flex: '1', minWidth: '140px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, marginBottom: '4px', color: colors.primaryText }}>
+                              이름 *
+                            </label>
+                            <input
+                              type="text"
+                              value={editCategoryName}
+                              onChange={(e) => setEditCategoryName(e.target.value)}
+                              style={{ width: '100%', padding: '7px 10px', fontSize: '13px', border: `1px solid ${colors.border}`, borderRadius: '4px', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div style={{ flex: '2', minWidth: '200px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, marginBottom: '4px', color: colors.primaryText }}>
+                              설명
+                            </label>
+                            <input
+                              type="text"
+                              value={editCategoryDescription}
+                              onChange={(e) => setEditCategoryDescription(e.target.value)}
+                              style={{ width: '100%', padding: '7px 10px', fontSize: '13px', border: `1px solid ${colors.border}`, borderRadius: '4px', boxSizing: 'border-box' }}
+                            />
+                          </div>
                         </div>
-                      )}
-                      <div style={{ fontSize: '12px', color: colors.secondaryText, marginTop: '8px' }}>
-                        생성일: {new Date(category.createdAt).toLocaleDateString('ko-KR')}
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={() => handleUpdateCategory(category.id)}
+                            disabled={updatingCategoryId === category.id}
+                            style={{
+                              padding: '7px 14px', fontSize: '13px', fontWeight: 500,
+                              color: '#ffffff', backgroundColor: '#374151',
+                              border: 'none', borderRadius: '6px',
+                              cursor: updatingCategoryId === category.id ? 'not-allowed' : 'pointer',
+                              opacity: updatingCategoryId === category.id ? 0.6 : 1,
+                            }}
+                          >
+                            {updatingCategoryId === category.id ? '저장 중...' : '저장'}
+                          </button>
+                          <button
+                            onClick={handleCancelEditCategory}
+                            style={{
+                              padding: '7px 14px', fontSize: '13px',
+                              color: colors.primaryText, backgroundColor: 'transparent',
+                              border: `1px solid ${colors.border}`, borderRadius: '6px', cursor: 'pointer',
+                            }}
+                          >
+                            취소
+                          </button>
+                        </div>
                       </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleDeleteCategory(category.id, category.name)}
-                      disabled={deletingCategoryId === category.id}
-                      style={{
-                        padding: '8px 12px',
-                        fontSize: '13px',
-                        color: '#dc2626',
-                        backgroundColor: '#fef2f2',
-                        border: '1px solid #fecaca',
-                        borderRadius: '6px',
-                        cursor: deletingCategoryId === category.id ? 'not-allowed' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        opacity: deletingCategoryId === category.id ? 0.5 : 1,
-                      }}
-                    >
-                      <Trash2 size={14} />
-                      {deletingCategoryId === category.id ? '삭제 중...' : '삭제'}
-                    </button>
+                    ) : (
+                      /* 뷰 모드 */
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '12px', color: colors.secondaryText, marginBottom: '2px' }}>
+                            {category.code ?? category.name}
+                          </div>
+                          <div style={{ fontSize: '15px', fontWeight: 600, marginBottom: '4px' }}>
+                            {category.name}
+                          </div>
+                          {category.description && (
+                            <div style={{ fontSize: '13px', color: colors.secondaryText }}>
+                              {category.description}
+                            </div>
+                          )}
+                          <div style={{ fontSize: '12px', color: colors.secondaryText, marginTop: '8px' }}>
+                            생성일: {new Date(category.createdAt).toLocaleDateString('ko-KR')}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                          <button
+                            onClick={() => handleStartEditCategory(category)}
+                            style={{
+                              padding: '8px 12px', fontSize: '13px',
+                              color: '#374151', backgroundColor: '#f3f4f6',
+                              border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer',
+                            }}
+                          >
+                            수정
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCategory(category.id, category.name)}
+                            disabled={deletingCategoryId === category.id}
+                            style={{
+                              padding: '8px 12px', fontSize: '13px',
+                              color: '#dc2626', backgroundColor: '#fef2f2',
+                              border: '1px solid #fecaca', borderRadius: '6px',
+                              cursor: deletingCategoryId === category.id ? 'not-allowed' : 'pointer',
+                              display: 'flex', alignItems: 'center', gap: '6px',
+                              opacity: deletingCategoryId === category.id ? 0.5 : 1,
+                            }}
+                          >
+                            <Trash2 size={14} />
+                            {deletingCategoryId === category.id ? '삭제 중...' : '삭제'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

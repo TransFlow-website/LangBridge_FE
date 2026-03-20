@@ -7136,7 +7136,9 @@ const NewTranslation: React.FC = () => {
     } catch (error: any) {
       console.error('Save error:', error);
       setSaveError(error?.response?.data?.message || '저장 실패');
-      alert(`임시저장에 실패했습니다.\n오류: ${error?.response?.data?.message || error.message || '저장 실패'}`);
+      if (!isAutoSave) {
+        alert(`임시저장에 실패했습니다.\n오류: ${error?.response?.data?.message || error.message || '저장 실패'}`);
+      }
     }
   };
 
