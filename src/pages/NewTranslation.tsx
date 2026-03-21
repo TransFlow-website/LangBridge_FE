@@ -4409,7 +4409,7 @@ const Step4Translation: React.FC<{
   isTranslating: boolean;
   translatingProgress?: number;
 }> = ({ onConfirm, onCancel, isTranslating, translatingProgress = 0 }) => {
-  const [sourceLang, setSourceLang] = useState('auto');
+  const [sourceLang, setSourceLang] = useState('en');
   const [targetLang, setTargetLang] = useState('ko');
 
   const languages = [
