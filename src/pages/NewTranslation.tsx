@@ -6925,6 +6925,7 @@ const NewTranslation: React.FC = () => {
     
     setIsCreating(true);
     setSaveError(null);
+    const previousDraftDocumentId = documentId;
 
     try {
       // 1. 문서 생성 (또는 기존 문서 업데이트)
@@ -6965,6 +6966,16 @@ const NewTranslation: React.FC = () => {
           isFinal: false,
         });
         console.log('✅ AI 번역 버전 저장 완료');
+      }
+
+      // 임시저장으로 만들어 둔 문서는 최종 문서와 별도 행이므로 삭제
+      if (previousDraftDocumentId != null && previousDraftDocumentId !== response.id) {
+        try {
+          await documentApi.deleteDocument(previousDraftDocumentId);
+          console.log('🗑️ 임시저장 문서 삭제:', previousDraftDocumentId);
+        } catch (e: any) {
+          console.warn('⚠️ 임시저장 문서 삭제 실패 (무시):', e);
+        }
       }
 
       // 4. 완료 후 localStorage 클리어 및 문서 관리 페이지로 이동

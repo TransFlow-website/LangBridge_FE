@@ -61,7 +61,7 @@ const convertToDocumentListItem = (doc: DocumentResponse, categoryMap?: Map<numb
     priority,
     status: doc.status as DocumentState,
     lastModified: doc.updatedAt ? formatLastModifiedDate(doc.updatedAt) : undefined,
-    assignedManager: doc.lastModifiedBy?.name,
+    assignedManager: doc.createdBy?.name,
     isFinal: doc.currentVersionIsFinal === true,
     originalUrl: doc.originalUrl,
     hasVersions: doc.hasVersions === true,
@@ -266,7 +266,7 @@ export default function Documents() {
       filtered = filtered.filter((doc) => doc.priority === priorityMap[selectedPriority]);
     }
 
-    // 작성자 필터 (createdBy 정보가 필요하므로 임시로 담당자로 대체)
+    // 작성자 필터 (담당 관리자와 동일: 생성자 기준)
     if (selectedAuthor !== '전체') {
       filtered = filtered.filter((doc) => doc.assignedManager === selectedAuthor);
     }
