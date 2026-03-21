@@ -111,6 +111,31 @@ export const documentApi = {
   },
 
   /**
+   * URL로 이미 문서가 존재하는지 확인 (초벌 번역 중복 방지용)
+   */
+  checkUrlExists: async (url: string): Promise<{ exists: boolean }> => {
+    const response = await apiClient.get<{ exists: boolean }>(
+      `/documents/check-url?url=${encodeURIComponent(url.trim())}`
+    );
+    return response.data;
+  },
+
+  /**
+   * 현재 사용자가 해당 원문에서 만든 복사본이 있는지 조회 (번역 시작 전 중복 방지용)
+   */
+  getMyCopyBySourceId: async (sourceDocumentId: number): Promise<DocumentResponse | null> => {
+    try {
+      const response = await apiClient.get<DocumentResponse>(
+        `/documents/${sourceDocumentId}/my-copy`
+      );
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) return null;
+      throw err;
+    }
+  },
+
+  /**
    * 해당 문서를 바탕으로 이어받기용 복사본 생성 (관리자/중간관리자). 원작업자 문서에는 영향 없음.
    */
   copyForContinuation: async (documentId: number): Promise<DocumentResponse> => {

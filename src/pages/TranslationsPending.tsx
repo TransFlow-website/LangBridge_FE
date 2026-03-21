@@ -436,6 +436,20 @@ export default function TranslationsPending() {
 
   const handleStartTranslation = async (doc: DocumentListItem) => {
     if (startTranslationLoading) return;
+
+    // 이미 내가 이 문서의 복사본을 가지고 있는지 확인
+    try {
+      const myCopy = await documentApi.getMyCopyBySourceId(doc.id);
+      if (myCopy) {
+        const proceed = window.confirm(
+          '이미 이 문서의 번역을 진행 중입니다. 이어하기를 사용해주세요. 그래도 새로 번역을 시작하시겠습니까?'
+        );
+        if (!proceed) return;
+      }
+    } catch (err) {
+      console.warn('내 복사본 조회 실패 (번역 시작 계속 진행):', err);
+    }
+
     setStartTranslationLoading(true);
     try {
       const res = await translationWorkApi.startTranslation(doc.id);

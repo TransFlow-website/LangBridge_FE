@@ -6623,6 +6623,19 @@ const NewTranslation: React.FC = () => {
       return;
     }
 
+    // 이미 해당 URL로 초벌 번역된 문서가 있는지 확인
+    try {
+      const { exists } = await documentApi.checkUrlExists(draft.url.trim());
+      if (exists) {
+        const proceed = window.confirm(
+          '이미 이 주소로 초벌 번역이 진행된 문서가 있습니다. 그대로 새로 진행하시겠습니까?'
+        );
+        if (!proceed) return;
+      }
+    } catch (err) {
+      console.warn('URL 중복 체크 실패 (크롤링 계속 진행):', err);
+    }
+
     setIsLoading(true);
     setLoadingProgress(0);
     setSaveError(null);
