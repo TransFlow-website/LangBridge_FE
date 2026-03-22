@@ -8,11 +8,17 @@ import { Button } from '../components/Button';
 import { documentApi, DocumentResponse, DocumentVersionResponse } from '../services/documentApi';
 import { categoryApi } from '../services/categoryApi';
 import { useUser } from '../contexts/UserContext';
-import { translationWorkApi, LockStatusResponse } from '../services/translationWorkApi';
+import { LockStatusResponse } from '../services/translationWorkApi';
 import { formatLastModifiedDate } from '../utils/dateUtils';
 import { StatusBadge } from '../components/StatusBadge';
 
-const categories = ['전체', '웹사이트', '마케팅', '고객지원', '기술문서'];
+/** 내가 시작한 복사본 중, 목록에 보여 줄 상태 (번역 중 ~ 게시까지) */
+const MY_ASSIGNMENT_STATUSES = new Set<string>([
+  'IN_TRANSLATION',
+  'PENDING_REVIEW',
+  'APPROVED',
+  'PUBLISHED',
+]);
 
 function countParagraphs(html: string): number {
   if (!html || html.trim().length === 0) return 0;
@@ -55,7 +61,11 @@ const convertToDocumentListItem = (
   currentVersionNumber: number | null
 ): DocumentListItem => {
   let progress = 0;
-  if (doc.status === 'IN_TRANSLATION' && originalVersion?.content) {
+  if (doc.status === 'APPROVED' || doc.status === 'PUBLISHED') {
+    progress = 100;
+  } else if (doc.status === 'PENDING_REVIEW') {
+    progress = 100;
+  } else if (doc.status === 'IN_TRANSLATION' && originalVersion?.content) {
     const totalParagraphs = countParagraphs(originalVersion.content);
     if (totalParagraphs > 0) {
       const completedCount = lockStatus?.completedParagraphs?.length || 0;
@@ -94,12 +104,26 @@ export default function TranslationsWorking() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('전체');
+  const [categories, setCategories] = useState<string[]>(['전체']);
   const [sortOption, setSortOption] = useState<DocumentSortOption>({
     field: 'lastModified',
     order: 'desc',
   });
 
-  // API에서 문서 목록 가져오기 (카테고리 로드 후 한 번만)
+  // 카테고리 목록 (번역 대기 문서 페이지와 동일하게 API에서 로드)
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const categoryList = await categoryApi.getAllCategories();
+        setCategories(['전체', ...categoryList.map((cat) => cat.name)]);
+      } catch (e) {
+        console.error('카테고리 목록 로드 실패:', e);
+      }
+    };
+    loadCategories();
+  }, []);
+
+  // API에서 문서 목록 가져오기
   useEffect(() => {
     const fetchDocuments = async () => {
       if (!user?.id) {
@@ -119,11 +143,14 @@ export default function TranslationsWorking() {
         const map = new Map<number, string>();
         categoryList.forEach((cat) => map.set(cat.id, cat.name));
 
-        const inTranslationDocs = allDocuments.filter((doc) => doc.status === 'IN_TRANSLATION');
         const myId = user?.id;
-        // 락 제거됨: 복사본의 createdBy가 나인 문서만 "내 작업"
+        // 복사본의 createdBy가 나인 문서만 — 번역 중·검토 대기·승인·게시까지 포함
         const myWorkingDocs = myId != null
-          ? inTranslationDocs.filter((doc) => Number(doc.createdBy?.id) === Number(myId))
+          ? allDocuments.filter(
+              (doc) =>
+                MY_ASSIGNMENT_STATUSES.has(doc.status) &&
+                Number(doc.createdBy?.id) === Number(myId)
+            )
           : [];
 
         const docsWithVersion = await Promise.all(
@@ -147,10 +174,6 @@ export default function TranslationsWorking() {
           convertToDocumentListItem(doc, map, lockStatus, originalVersion, currentVersionNumber)
         );
         setDocuments(converted);
-
-        if (converted.length === 0 && inTranslationDocs.length > 0) {
-          console.warn('⚠️ 현재 작업 중인 문서가 없습니다.');
-        }
       } catch (err) {
         console.error('❌ 문서 목록 조회 실패:', err);
         setError(err instanceof Error ? err.message : '문서 목록을 불러오는데 실패했습니다.');
@@ -200,18 +223,6 @@ export default function TranslationsWorking() {
 
   const handleViewDetail = (doc: DocumentListItem) => {
     navigate(`/documents/${doc.id}?from=working`);
-  };
-
-  const getStatusText = (status: DocumentState) => {
-    const statusMap: Record<DocumentState, string> = {
-      'DRAFT': '초안',
-      'PENDING_TRANSLATION': '번역 대기',
-      'IN_TRANSLATION': '번역 중',
-      'PENDING_REVIEW': '검토 대기',
-      'APPROVED': '번역 완료',
-      'PUBLISHED': '공개됨',
-    };
-    return statusMap[status] || status;
   };
 
   const truncateUrl = (url: string, maxLen: number = 24) => {
@@ -319,7 +330,9 @@ export default function TranslationsWorking() {
       label: '액션',
       width: '260px',
       align: 'right',
-      render: (item) => (
+      render: (item) => {
+        const doneOrPublished = item.status === 'APPROVED' || item.status === 'PUBLISHED';
+        return (
         <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
           <Button
             variant="secondary"
@@ -339,10 +352,11 @@ export default function TranslationsWorking() {
             }}
             style={{ fontSize: '12px', padding: '6px 12px' }}
           >
-            이어하기
+            {doneOrPublished ? '보기' : '이어하기'}
           </Button>
         </div>
-      ),
+        );
+      },
     },
   ];
 
@@ -365,11 +379,20 @@ export default function TranslationsWorking() {
             fontSize: '20px',
             fontWeight: 600,
             color: '#000000',
-            marginBottom: '24px',
+            marginBottom: '8px',
           }}
         >
           내가 작업 중인 문서
         </h1>
+        <p
+          style={{
+            fontSize: '13px',
+            color: colors.secondaryText,
+            marginBottom: '24px',
+          }}
+        >
+          번역 중·검토 대기·승인 완료·게시까지, 내가 시작한 문서가 여기에 표시됩니다.
+        </p>
 
         {/* 필터/정렬 바 */}
         <div
@@ -470,7 +493,7 @@ export default function TranslationsWorking() {
               // 행 클릭 시 번역 작업 화면으로 이동
               handleContinueTranslation(item);
             }}
-            emptyMessage="현재 작업 중인 문서가 없습니다. 번역 대기 문서에서 번역을 시작하세요."
+            emptyMessage="표시할 문서가 없습니다. 번역 대기 문서에서 번역을 시작하거나, 다른 계정으로 만든 문서는 여기에 나오지 않습니다."
           />
         )}
       </div>
