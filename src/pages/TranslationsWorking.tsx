@@ -12,8 +12,6 @@ import { translationWorkApi, LockStatusResponse } from '../services/translationW
 import { formatLastModifiedDate } from '../utils/dateUtils';
 import { StatusBadge } from '../components/StatusBadge';
 
-const categories = ['전체', '웹사이트', '마케팅', '고객지원', '기술문서'];
-
 function countParagraphs(html: string): number {
   if (!html || html.trim().length === 0) return 0;
   try {
@@ -94,12 +92,26 @@ export default function TranslationsWorking() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('전체');
+  const [categories, setCategories] = useState<string[]>(['전체']);
   const [sortOption, setSortOption] = useState<DocumentSortOption>({
     field: 'lastModified',
     order: 'desc',
   });
 
-  // API에서 문서 목록 가져오기 (카테고리 로드 후 한 번만)
+  // 카테고리 목록 (번역 대기 문서 페이지와 동일하게 API에서 로드)
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const categoryList = await categoryApi.getAllCategories();
+        setCategories(['전체', ...categoryList.map((cat) => cat.name)]);
+      } catch (e) {
+        console.error('카테고리 목록 로드 실패:', e);
+      }
+    };
+    loadCategories();
+  }, []);
+
+  // API에서 문서 목록 가져오기
   useEffect(() => {
     const fetchDocuments = async () => {
       if (!user?.id) {

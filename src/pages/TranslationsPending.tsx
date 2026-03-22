@@ -437,6 +437,13 @@ export default function TranslationsPending() {
   const handleStartTranslation = async (doc: DocumentListItem) => {
     if (startTranslationLoading) return;
 
+    if (doc.status === 'APPROVED' || doc.status === 'PUBLISHED') {
+      const proceed = window.confirm(
+        '이 문서는 이미 번역이 완료된 문서입니다. 그래도 원문 기준으로 새 번역 작업을 시작하시겠습니까?'
+      );
+      if (!proceed) return;
+    }
+
     // 이미 내가 이 문서의 복사본을 가지고 있는지 확인
     try {
       const myCopy = await documentApi.getMyCopyBySourceId(doc.id);
@@ -764,8 +771,10 @@ export default function TranslationsPending() {
       align: 'right',
       render: (item) => {
         if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
-        const isPending = item.status === 'PENDING_TRANSLATION';
-        const showStartBtn = isPending && !item.isCopyRow;
+        // 원문 행: 백엔드는 원문이면 상태와 무관하게 새 복사본(v1 기준) 생성 가능.
+        // 원문이 IN_TRANSLATION 등으로 보이는 경우에도 다른 봉사자가 v1부터 새로 시작할 수 있어야 함.
+        const isSourceRow = !item.isCopyRow && !(item as RowItem).isLoadingRow;
+        const showStartBtn = isSourceRow;
         const isMyCopy = item.isCopyRow && Number((item as RowItem).createdById) === Number(user?.id);
         const hasHandoverRequest = !!(item as RowItem).hasHandoverRequest;
         const showResumeBtn = isMyCopy;
@@ -829,7 +838,7 @@ export default function TranslationsPending() {
                 }}
                 style={{ fontSize: '12px', padding: '6px 12px' }}
               >
-                이어서 새로 번역하기
+                이어서 번역하기
               </Button>
             )}
           </div>
