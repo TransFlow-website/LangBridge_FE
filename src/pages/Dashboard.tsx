@@ -94,11 +94,15 @@ const Dashboard: React.FC = () => {
           progress: 0,
         }));
 
-        // 2. 내가 작업 중인 문서 (IN_TRANSLATION이면서 createdBy가 나인 복사본만, 락 제거됨)
+        // 2. 내가 작업 중인 문서 (IN_TRANSLATION: 생성 또는 최근 수정이 나인 복사본)
         const inTranslationDocs = await documentApi.getAllDocuments({ status: 'IN_TRANSLATION' });
         const myId = user?.id;
         const myWorkingDocs: DocumentResponse[] = myId != null
-          ? inTranslationDocs.filter((doc) => Number(doc.createdBy?.id) === Number(myId))
+          ? inTranslationDocs.filter(
+              (doc) =>
+                Number(doc.createdBy?.id) === Number(myId) ||
+                Number(doc.lastModifiedBy?.id) === Number(myId),
+            )
           : [];
         const workingDocuments: Document[] = myWorkingDocs.slice(0, 3).map(doc => ({
           id: doc.id,

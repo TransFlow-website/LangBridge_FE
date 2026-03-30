@@ -37,6 +37,7 @@ import {
 } from "../constants/documentStatusLabels";
 import { useUser } from "../contexts/UserContext";
 import { UserRole } from "../types/user";
+import { useMyInTranslationBySourceId } from "../hooks/useMyInTranslationBySourceId";
 
 /** 원문·복사본 공통: 빈 배열 = 전체, 그 외 = 선택한 DocumentState 중 하나와 같으면 일치 */
 function documentMatchesStatusFilter(
@@ -272,6 +273,11 @@ export default function TranslationsPending() {
 	const [startTranslationLoading, setStartTranslationLoading] = useState(false);
 	const [continueTranslationLoading, setContinueTranslationLoading] =
 		useState(false);
+
+	const myInTranslationBySourceId = useMyInTranslationBySourceId(
+		documents,
+		user?.id,
+	);
 
 	const copiesBySourceIdRef = useRef(copiesBySourceId);
 	copiesBySourceIdRef.current = copiesBySourceId;
@@ -1180,20 +1186,40 @@ export default function TranslationsPending() {
 					</div>
 				);
 				if (!item.isCopyRow) {
+					const showMyTranslationBadge =
+						myInTranslationBySourceId.get(item.id) === true;
 					return wrapStatus(
-						<span
-							style={{
-								display: "inline-block",
-								padding: "2px 5px",
-								borderRadius: "4px",
-								fontSize: "10px",
-								fontWeight: 500,
-								backgroundColor: "#E8E6F0",
-								color: "#5B5694",
-							}}
-						>
-							원문
-						</span>,
+						<>
+							<span
+								style={{
+									display: "inline-block",
+									padding: "2px 5px",
+									borderRadius: "4px",
+									fontSize: "10px",
+									fontWeight: 500,
+									backgroundColor: "#E8E6F0",
+									color: "#5B5694",
+								}}
+							>
+								원문
+							</span>
+							{showMyTranslationBadge && (
+								<span
+									title="이 원문에 대해 내가 번역 중인 복사본이 있습니다."
+									style={{
+										display: "inline-block",
+										padding: "2px 5px",
+										borderRadius: "4px",
+										fontSize: "10px",
+										fontWeight: 600,
+										backgroundColor: "#FFF3E0",
+										color: "#E65100",
+									}}
+								>
+									내 번역
+								</span>
+							)}
+						</>,
 					);
 				}
 				if (row.hasHandoverRequest) {
