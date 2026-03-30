@@ -23,6 +23,8 @@ export interface DocumentResponse {
   status: string;
   currentVersionId?: number;
   currentVersionNumber?: number;
+  /** 목록 표시용: v1=초벌, v2=첫 수동… (서버 계산, currentVersionNumber와 함께 제공) */
+  userFacingVersionNumber?: number;
   /** 현재 버전이 승인 등으로 최종(FINAL) 처리되었는지 */
   currentVersionIsFinal?: boolean;
   estimatedLength?: number;
@@ -53,6 +55,14 @@ export interface DocumentResponse {
       name: string;
     };
     handedOverAt: string;
+  };
+  /** 동일 원문에 관리자 번역 세션 활성(하트비트 TTL 내) */
+  adminTranslationSessionActive?: boolean;
+  adminSessionCopyDocumentId?: number | null;
+  adminSessionUser?: {
+    id: number;
+    email: string;
+    name: string;
   };
 }
 
@@ -108,6 +118,17 @@ export const documentApi = {
   getCopiesBySourceId: async (sourceDocumentId: number): Promise<DocumentResponse[]> => {
     const response = await apiClient.get<DocumentResponse[]>(`/documents/${sourceDocumentId}/copies`);
     return response.data;
+  },
+
+  /**
+   * 원문 ID 목록에 대해 IN_TRANSLATION 복사본 개수만 배치 조회 (목록 인원 칸용, 단일 요청)
+   */
+  getInTranslationCopyCounts: async (sourceDocumentIds: number[]): Promise<Record<string, number>> => {
+    const response = await apiClient.post<Record<string, number>>(
+      '/documents/in-translation-copy-counts',
+      sourceDocumentIds
+    );
+    return response.data ?? {};
   },
 
   /**

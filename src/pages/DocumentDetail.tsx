@@ -467,6 +467,23 @@ export default function DocumentDetail() {
                 <div style={{ fontSize: '14px', fontWeight: 600, color: '#000000' }}>
                   {document.title}
                 </div>
+                {document.originalUrl?.trim() && (
+                  <div style={{ marginTop: '2px' }}>
+                    <a
+                      href={document.originalUrl.trim()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontSize: '12px',
+                        color: '#2563eb',
+                        textDecoration: 'none',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      원문 URL: {document.originalUrl.trim()}
+                    </a>
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   <span style={{ fontSize: '11px', color: colors.secondaryText }}>
                     {document.categoryId ? `카테고리 ${document.categoryId}` : '미분류'} · {

@@ -568,12 +568,6 @@ export default function Documents() {
     }
   };
 
-  const truncateUrl = (url: string, maxLen: number = 24) => {
-    if (!url || !url.trim()) return '';
-    const u = url.trim();
-    return u.length <= maxLen ? u : u.slice(0, maxLen) + '…';
-  };
-
   const expandColumn: TableColumn<RowItem> = {
     key: 'expand',
     label: '',
@@ -690,36 +684,6 @@ export default function Documents() {
               <span style={{ fontSize: '11px', color: colors.secondaryText, flexShrink: 0 }}>(복사본)</span>
             )}
           </div>
-        );
-      },
-    },
-    {
-      key: 'originalUrl',
-      label: '원문 URL',
-      width: 'minmax(0, 1fr)',
-      render: (item) => {
-        if ((item as RowItem).isLoadingRow) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
-        const url = item.originalUrl?.trim();
-        if (!url) return <span style={{ color: colors.secondaryText, fontSize: '12px' }}>-</span>;
-        return (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={url}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              fontSize: '12px',
-              color: '#2563eb',
-              textDecoration: 'none',
-              display: 'block',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {truncateUrl(url, 24)}
-          </a>
         );
       },
     },

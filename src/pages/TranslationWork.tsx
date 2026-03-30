@@ -16,6 +16,7 @@ import {
 import ErrorBoundary from '../components/ErrorBoundary';
 import { AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Palette, Quote, Minus, Link2, Highlighter, Image, Table, Code, Superscript, Subscript, MoreVertical, Undo2, Redo2 } from 'lucide-react';
 import './TranslationWork.css';
+import { useUser } from '../contexts/UserContext';
 
 export default function TranslationWork() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +24,7 @@ export default function TranslationWork() {
   const location = useLocation();
   const fromPath = (location.state as { from?: string } | null)?.from || '/translations/pending';
   const documentId = id ? parseInt(id, 10) : null;
+  const { user } = useUser();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -302,6 +304,30 @@ export default function TranslationWork() {
 
     loadData();
   }, [documentId]); // editor는 의존성에서 제거 (에디터가 없어도 데이터는 로드 가능)
+
+  /** 관리자(복사본 작업): 세션 시작·하트비트·종료 — 동일 원문 봉사자 편집 차단 */
+  useEffect(() => {
+    if (!documentId || !document?.sourceDocumentId) return;
+    if (!user || user.roleLevel > 2) return;
+
+    translationWorkApi.startAdminTranslationSession(documentId).catch(() => {});
+    const hb = setInterval(() => {
+      translationWorkApi.heartbeatAdminTranslationSession(documentId).catch(() => {});
+    }, 60_000);
+    return () => {
+      clearInterval(hb);
+      translationWorkApi.endAdminTranslationSession(documentId).catch(() => {});
+    };
+  }, [documentId, document?.sourceDocumentId, user?.roleLevel]);
+
+  /** 봉사자: 관리자 세션 여부 갱신 */
+  useEffect(() => {
+    if (!documentId || !user || user.roleLevel <= 2) return;
+    const t = setInterval(() => {
+      documentApi.getDocument(documentId).then(setDocument).catch(() => {});
+    }, 45_000);
+    return () => clearInterval(t);
+  }, [documentId, user?.roleLevel]);
 
   // 내 번역 iframe 렌더링 (HTML 구조 보존) + 약한 연동
   useEffect(() => {
@@ -1443,6 +1469,14 @@ export default function TranslationWork() {
     );
   }
 
+  const adminSessionOwnerId = document.adminSessionUser?.id;
+  const isAdminSessionOwner =
+    adminSessionOwnerId != null && user != null && Number(adminSessionOwnerId) === Number(user.id);
+  const isCompletedOrReview = ['PENDING_REVIEW', 'APPROVED', 'PUBLISHED'].includes(document.status);
+  const adminSessionBlocking =
+    !!document.adminTranslationSessionActive && document.sourceDocumentId != null;
+  const translationLocked = isCompletedOrReview || (adminSessionBlocking && !isAdminSessionOwner);
+
   const toggleAllPanels = () => {
     if (allPanelsCollapsed) {
       // 모든 패널 펼치기
@@ -1476,6 +1510,35 @@ export default function TranslationWork() {
         backgroundColor: colors.primaryBackground,
       }}
     >
+      {translationLocked && adminSessionBlocking && !isCompletedOrReview && (
+        <div
+          style={{
+            padding: '10px 24px',
+            backgroundColor: '#FFF3E0',
+            borderBottom: '1px solid #FFB74D',
+            fontSize: '13px',
+            color: '#5D4037',
+          }}
+        >
+          {document.adminSessionUser?.name
+            ? `${document.adminSessionUser.name} 관리자`
+            : '관리자'}
+          가 이 원문 번역을 진행 중입니다. 임시 저장·번역 완료·인계는 관리자 작업이 끝난 뒤 가능합니다.
+        </div>
+      )}
+      {isCompletedOrReview && (
+        <div
+          style={{
+            padding: '10px 24px',
+            backgroundColor: '#E8F5E9',
+            borderBottom: '1px solid #A5D6A7',
+            fontSize: '13px',
+            color: '#2E7D32',
+          }}
+        >
+          이 문서는 {getStatusText(document.status)} 상태입니다. 조회만 가능합니다.
+        </div>
+      )}
       {/* 상단 고정 바 */}
       <div
         style={{
@@ -1611,8 +1674,9 @@ export default function TranslationWork() {
         {/* 오른쪽: 저장/완료 버튼 */}
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button 
-            variant="secondary" 
+            variant={translationLocked ? 'disabled' : 'secondary'}
             onClick={async () => {
+              if (translationLocked) return;
               if (!documentId) {
                 alert('⚠️ 문서 ID가 없습니다.');
                 return;
@@ -1655,10 +1719,22 @@ export default function TranslationWork() {
           >
             💾 저장하기
           </Button>
-          <Button variant="secondary" onClick={handleHandover} style={{ fontSize: '12px' }}>
+          <Button
+            variant={translationLocked ? 'disabled' : 'secondary'}
+            onClick={() => {
+              if (!translationLocked) handleHandover();
+            }}
+            style={{ fontSize: '12px' }}
+          >
             인계 요청
           </Button>
-          <Button variant="primary" onClick={handleComplete} style={{ fontSize: '12px' }}>
+          <Button
+            variant={translationLocked ? 'disabled' : 'primary'}
+            onClick={() => {
+              if (!translationLocked) handleComplete();
+            }}
+            style={{ fontSize: '12px' }}
+          >
             번역 완료
           </Button>
         </div>
@@ -1744,6 +1820,25 @@ export default function TranslationWork() {
                   {panel.id === 'myTranslation' ? (
                     // 내 번역 패널 (iframe 기반 에디터 - HTML 구조 보존)
                     <>
+                      {translationLocked && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            zIndex: 50,
+                            backgroundColor: 'rgba(255,255,255,0.82)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '13px',
+                            color: '#555',
+                            textAlign: 'center',
+                            padding: '16px',
+                          }}
+                        >
+                          조회 전용 (편집 불가)
+                        </div>
+                      )}
                       {/* 편집 툴바 */}
                       <div style={{ padding: '8px 12px', borderBottom: '1px solid #C0C0C0', display: 'flex', justifyContent: 'flex-start', alignItems: 'center', backgroundColor: '#F8F9FA', flexWrap: 'wrap', gap: '8px' }}>
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>

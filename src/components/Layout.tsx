@@ -22,21 +22,34 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   return (
     <div
-      className="flex h-screen"
+      className="flex h-screen min-w-0 w-full max-w-full"
       style={{
         backgroundColor: colors.primaryBackground,
       }}
     >
       <Sidebar />
       <main
-        className="flex-1 overflow-y-auto transition-all"
+        className="flex min-w-0 flex-1 overflow-y-auto overflow-x-auto transition-all"
         style={{
-          marginLeft: isDesktop ? (isCollapsed ? sizes.sidebarWidth.collapsed : sizes.sidebarWidth.desktop) : '0',
+          boxSizing: 'border-box',
+          minWidth: 0,
+          /* flex-1만 쓰고 width:100% 제거 — 100%+padding과 겹치면 가로 넘침 발생 */
+          flex: '1 1 0%',
+          paddingLeft: isDesktop ? (isCollapsed ? sizes.sidebarWidth.collapsed : sizes.sidebarWidth.desktop) : '0',
           transitionDuration: transitions.duration,
           transitionTimingFunction: transitions.easing,
         }}
       >
-        {children}
+        <div
+          style={{
+            width: '100%',
+            maxWidth: '100%',
+            minWidth: 0,
+            boxSizing: 'border-box',
+          }}
+        >
+          {children}
+        </div>
       </main>
     </div>
   );

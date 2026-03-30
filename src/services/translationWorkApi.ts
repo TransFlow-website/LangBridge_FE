@@ -109,5 +109,26 @@ export const translationWorkApi = {
     );
     return response.data;
   },
+
+  startAdminTranslationSession: async (documentId: number): Promise<{ success: boolean; message?: string }> => {
+    const response = await apiClient.post<{ success: boolean; message?: string }>(
+      `/documents/${documentId}/admin-translation-session`
+    );
+    return response.data;
+  },
+
+  heartbeatAdminTranslationSession: async (documentId: number): Promise<{ success: boolean }> => {
+    const response = await apiClient.put<{ success: boolean }>(
+      `/documents/${documentId}/admin-translation-session/heartbeat`
+    );
+    return response.data;
+  },
+
+  endAdminTranslationSession: async (documentId: number): Promise<{ success: boolean; message?: string }> => {
+    const response = await apiClient.delete<{ success: boolean; message?: string }>(
+      `/documents/${documentId}/admin-translation-session`
+    );
+    return response.data;
+  },
 };
 

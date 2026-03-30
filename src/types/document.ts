@@ -17,15 +17,23 @@ export interface DocumentListItem {
   priority: Priority;
   status: DocumentState;
   lastModified?: string; // 마지막 수정 시점 (ISO string 또는 "2시간 전" 형식)
+  /** 문서 생성 시각 (ISO, 목록 정렬·순번용) */
+  createdAt?: string;
   assignedManager?: string; // 담당 관리자
   isFinal: boolean; // Final 여부
   originalUrl?: string;
   currentWorker?: string; // 현재 작업자 (IN_TRANSLATION 상태인 경우)
   isMyLock?: boolean; // IN_TRANSLATION일 때 현재 사용자가 락을 보유 중인지
   currentVersionId?: number; // 현재 버전 ID
-  currentVersionNumber?: number; // 현재 버전 번호 (1, 2, 3...)
+  currentVersionNumber?: number; // DB 기준 버전 번호 (0=원문, 1=초벌…)
+  /** 표시용 v1,v2… (서버 userFacingVersionNumber) */
+  userFacingVersionNumber?: number;
   hasVersions?: boolean; // 버전 존재 여부
   sourceDocumentId?: number | null; // 원문 문서 ID (복사본인 경우)
+  /** 동일 원문에 관리자 번역 세션 활성(하트비트 TTL 내) */
+  adminTranslationSessionActive?: boolean;
+  adminSessionCopyDocumentId?: number | null;
+  adminSessionUser?: { id: number; name: string; email?: string };
 }
 
 export interface DocumentFilter {
@@ -36,7 +44,7 @@ export interface DocumentFilter {
 }
 
 export interface DocumentSortOption {
-  field: 'deadline' | 'progress' | 'lastModified' | 'title';
+  field: 'deadline' | 'progress' | 'lastModified' | 'title' | 'estimatedLength' | 'createdAt';
   order: 'asc' | 'desc';
 }
 
