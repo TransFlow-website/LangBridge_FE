@@ -1025,9 +1025,9 @@ export default function Documents() {
 
 	const countColumn: TableColumn<RowItem> = {
 		key: "generatedCopyCount",
-		label: "문서 수",
+		label: "생성 문서",
 		sortKey: "generatedCopyCount",
-		width: "64px",
+		width: "74px",
 		align: "center",
 		render: (item) => {
 			const row = item as RowItem;
@@ -1283,7 +1283,7 @@ export default function Documents() {
 		},
 		{
 			key: "lastModified",
-			label: "마지막 수정",
+			label: "최근 수정",
 			sortKey: "lastModified",
 			width: "minmax(0, 0.85fr)",
 			align: "right",
