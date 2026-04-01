@@ -10,10 +10,110 @@ import { Modal } from '../components/Modal';
 import { WysiwygEditor, EditorMode } from '../components/WysiwygEditor';
 import { documentApi, DocumentResponse } from '../services/documentApi';
 import { translationApi } from '../services/api';
+import { termApi } from '../services/termApi';
 import { AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Palette, Quote, Minus, Link2, Highlighter, Image, Table, Code, Superscript, Subscript, MoreVertical, Undo2, Redo2 } from 'lucide-react';
 
 // 수동 서식 넣기용 최소 HTML 템플릿
 const MANUAL_PASTE_HTML = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:system-ui,Pretendard,sans-serif;padding:16px;margin:0;min-height:400px;}</style></head><body><div contenteditable="true" style="min-height:400px;outline:none;"></div></body></html>';
+const WORD_CHAR_REGEX = /[A-Za-z0-9_]/;
+type GlossaryTermPair = { sourceTerm: string; targetTerm: string };
+
+const highlightGlossaryInOriginalIframe = (doc: Document, glossaryTerms: GlossaryTermPair[]) => {
+  if (!doc.body || glossaryTerms.length === 0) return;
+
+  const sortedTerms = [...glossaryTerms]
+    .map((t) => ({ sourceTerm: t.sourceTerm.trim(), targetTerm: t.targetTerm.trim() }))
+    .filter((t) => t.sourceTerm.length > 1 && t.targetTerm.length > 0)
+    .sort((a, b) => b.sourceTerm.length - a.sourceTerm.length);
+  if (sortedTerms.length === 0) return;
+
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let current: Node | null = walker.nextNode();
+  while (current) {
+    const parentTag = (current.parentElement?.tagName || '').toLowerCase();
+    if (parentTag !== 'script' && parentTag !== 'style' && current.textContent?.trim()) {
+      textNodes.push(current as Text);
+    }
+    current = walker.nextNode();
+  }
+
+  textNodes.forEach((textNode) => {
+    const source = textNode.textContent || '';
+    const lower = source.toLowerCase();
+    let cursor = 0;
+    const fragment = doc.createDocumentFragment();
+    let matched = false;
+
+    while (cursor < source.length) {
+      let bestStart = -1;
+      let bestEnd = -1;
+      let bestTerm: GlossaryTermPair | null = null;
+
+      for (const term of sortedTerms) {
+        const termLower = term.sourceTerm.toLowerCase();
+        const found = lower.indexOf(termLower, cursor);
+        if (found === -1) continue;
+        const end = found + termLower.length;
+
+        const before = found > 0 ? source[found - 1] : '';
+        const after = end < source.length ? source[end] : '';
+        const leftBoundary = !before || !WORD_CHAR_REGEX.test(before);
+        const rightBoundary = !after || !WORD_CHAR_REGEX.test(after);
+        if (!leftBoundary || !rightBoundary) continue;
+
+        if (bestStart === -1 || found < bestStart || (found === bestStart && bestTerm && term.sourceTerm.length > bestTerm.sourceTerm.length)) {
+          bestStart = found;
+          bestEnd = end;
+          bestTerm = term;
+        }
+      }
+
+      if (bestStart === -1) {
+        fragment.appendChild(doc.createTextNode(source.slice(cursor)));
+        break;
+      }
+
+      if (bestStart > cursor) {
+        fragment.appendChild(doc.createTextNode(source.slice(cursor, bestStart)));
+      }
+
+      const span = doc.createElement('span');
+      span.className = 'original-glossary-term';
+      span.setAttribute('data-source-term', bestTerm?.sourceTerm || '');
+      span.setAttribute('data-target-term', bestTerm?.targetTerm || '');
+      span.textContent = `${source.slice(bestStart, bestEnd)}(${bestTerm?.targetTerm || ''})`;
+      fragment.appendChild(span);
+
+      matched = true;
+      cursor = bestEnd;
+    }
+
+    if (matched) textNode.replaceWith(fragment);
+  });
+};
+
+// 과거 버전에서 AI_DRAFT에 삽입된 glossary-term 마크업 제거
+const removeLegacyGlossaryMarkup = (html: string) => {
+  if (!html) return html;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const glossaryNodes = doc.querySelectorAll('span.glossary-term');
+
+    glossaryNodes.forEach((node) => {
+      const original = node.getAttribute('data-original') || '';
+      const text = node.textContent || '';
+      const suffix = original ? `(${original})` : '';
+      const restored = suffix && text.endsWith(suffix) ? text.slice(0, -suffix.length) : text;
+      node.replaceWith(doc.createTextNode(restored));
+    });
+
+    return doc.documentElement.outerHTML;
+  } catch {
+    return html;
+  }
+};
 
 // STEP 1: 크롤링 주소 입력
 const Step1CrawlingInput: React.FC<{
@@ -186,6 +286,31 @@ const Step1CrawlingInput: React.FC<{
         <span style={{ fontSize: '12px', color: '#696969' }}>
           크롤링이 잘 되지 않을 때 웹사이트에서 복사한 내용을 붙여넣기 할 수 있습니다
         </span>
+      )}
+      {url.trim().toLowerCase().endsWith('.pdf') && (
+        <div
+          style={{
+            width: '100%',
+            maxWidth: '600px',
+            padding: '12px 16px',
+            backgroundColor: '#EFF6FF',
+            border: '1px solid #BFDBFE',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+          }}
+        >
+          <span style={{ fontSize: '18px', flexShrink: 0 }}>📄</span>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: '#1D4ED8', marginBottom: '4px' }}>
+              PDF 문서가 감지됐습니다
+            </div>
+            <div style={{ fontSize: '12px', color: '#1E40AF', lineHeight: '1.5' }}>
+              PDF URL은 텍스트를 자동으로 추출하여 번역 등록합니다. 일반 웹페이지와 동일하게 크롤링 실행을 눌러주세요.
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -4581,7 +4706,18 @@ const Step5ParallelEdit: React.FC<{
   onTranslatedChange: (html: string) => void;
   collapsedPanels: Set<string>;
   onTogglePanel: (panelId: string) => void;
-}> = ({ crawledHtml, selectedHtml, translatedHtml, onTranslatedChange, collapsedPanels, onTogglePanel }) => {
+  showVersion0Glossary: boolean;
+  glossaryTerms: GlossaryTermPair[];
+}> = ({
+  crawledHtml,
+  selectedHtml,
+  translatedHtml,
+  onTranslatedChange,
+  collapsedPanels,
+  onTogglePanel,
+  showVersion0Glossary,
+  glossaryTerms,
+}) => {
   const [mode, setMode] = useState<EditorMode>('text');
   const [fullscreenPanel, setFullscreenPanel] = useState<string | null>(null);
   const [selectedElements, setSelectedElements] = useState<HTMLElement[]>([]);
@@ -4653,13 +4789,31 @@ const Step5ParallelEdit: React.FC<{
         iframeDoc.open();
         iframeDoc.write(selectedHtml);
         iframeDoc.close();
+
+        // Version 0 용어집 표시 스타일
+        const style = iframeDoc.createElement('style');
+        style.textContent = `
+          .original-glossary-term {
+            background-color: #fff4c2;
+            color: #7a4b00;
+            font-weight: 700;
+            border-radius: 3px;
+            padding: 0 2px;
+          }
+        `;
+        iframeDoc.head.appendChild(style);
+
+        if (showVersion0Glossary) {
+          highlightGlossaryInOriginalIframe(iframeDoc, glossaryTerms);
+        }
+
         selectedLoadedRef.current = true;
         console.log('✅ 선택한 영역 iframe 렌더링 완료');
       } catch (error) {
         console.warn('selected iframe write error (ignored):', error);
       }
     }
-  }, [selectedHtml, collapsedPanels, fullscreenPanel]);
+  }, [selectedHtml, collapsedPanels, fullscreenPanel, showVersion0Glossary, glossaryTerms]);
 
   // 편집본 iframe 초기 렌더링 (NewTranslation 전용) - 한 번만 실행
   useEffect(() => {
@@ -6507,6 +6661,8 @@ const NewTranslation: React.FC = () => {
   const step6Ref = React.useRef<{ handleDraftSave: () => void; handlePublish: () => void } | null>(null);
   // Step 5용 패널 접기/펼치기 상태
   const [step5CollapsedPanels, setStep5CollapsedPanels] = useState<Set<string>>(new Set());
+  const [showStep5Version0Glossary, setShowStep5Version0Glossary] = useState(false);
+  const [step5GlossaryTerms, setStep5GlossaryTerms] = useState<GlossaryTermPair[]>([]);
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [urlModalInput, setUrlModalInput] = useState('');
 
@@ -6558,6 +6714,34 @@ const NewTranslation: React.FC = () => {
     };
     loadDraftDocuments();
   }, []);
+
+  // Step 5 (Version 0) 용어집 sourceTerm 로드
+  useEffect(() => {
+    const loadStep5GlossaryTerms = async () => {
+      try {
+        const sourceLangRaw = (draft.sourceLang || '').toUpperCase();
+        const sourceLang = sourceLangRaw === 'AUTO' ? 'EN' : sourceLangRaw;
+        const targetLang = (draft.targetLang || '').toUpperCase();
+
+        if (!sourceLang || !targetLang) {
+          setStep5GlossaryTerms([]);
+          return;
+        }
+
+        const termRes = await termApi.getAllTerms({ sourceLang, targetLang, page: 0, size: 1000 });
+        setStep5GlossaryTerms(
+          (termRes.content || [])
+            .filter((t) => t.sourceTerm && t.targetTerm)
+            .map((t) => ({ sourceTerm: t.sourceTerm, targetTerm: t.targetTerm }))
+        );
+      } catch (e) {
+        console.warn('Step 5 용어집 로드 실패:', e);
+        setStep5GlossaryTerms([]);
+      }
+    };
+
+    loadStep5GlossaryTerms();
+  }, [draft.sourceLang, draft.targetLang]);
 
   // 권한 체크
   useEffect(() => {
@@ -7229,9 +7413,11 @@ const NewTranslation: React.FC = () => {
           <Step5ParallelEdit
             crawledHtml={draft.originalHtml} // STEP 1에서 크롤링한 전체 원문
             selectedHtml={draft.editedHtml || draft.originalHtmlWithIds || ''} // STEP 2/3에서 선택한 영역
-            translatedHtml={draft.translatedHtml || ''}
+            translatedHtml={removeLegacyGlossaryMarkup(draft.translatedHtml || '')}
             onTranslatedChange={(html) => setDraft((prev) => ({ ...prev, translatedHtml: html }))}
             collapsedPanels={step5CollapsedPanels}
+            showVersion0Glossary={showStep5Version0Glossary}
+            glossaryTerms={step5GlossaryTerms}
             onTogglePanel={(panelId) => {
               setStep5CollapsedPanels(prev => {
                 const newSet = new Set(prev);
@@ -7352,6 +7538,23 @@ const NewTranslation: React.FC = () => {
             border: '1px solid #D3D3D3',
           }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: '#000000' }}>문서 보기:</span>
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: 500,
+              color: '#7a4b00',
+            }}>
+              <input
+                type="checkbox"
+                checked={showStep5Version0Glossary}
+                onChange={(e) => setShowStep5Version0Glossary(e.target.checked)}
+                style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+              />
+              <span>Version 0 용어집 적용 구간 보기</span>
+            </label>
             <label style={{ 
               display: 'flex', 
               alignItems: 'center', 

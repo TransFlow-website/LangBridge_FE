@@ -95,6 +95,16 @@ export interface UpdateDocumentRequest {
   draftData?: string; // 임시저장 데이터 (JSON)
 }
 
+export interface DocumentCommentResponse {
+  id: number;
+  documentId: number;
+  authorId: number;
+  authorName: string;
+  authorProfileImage?: string;
+  content: string;
+  createdAt: string;
+}
+
 export const documentApi = {
   /**
    * 문서 생성
@@ -331,6 +341,38 @@ export const documentApi = {
   deleteDocument: async (id: number): Promise<{ success: boolean; message: string }> => {
     const response = await apiClient.delete<{ success: boolean; message: string }>(`/documents/${id}`);
     return response.data;
+  },
+
+  // ──────────────────────────────────────────────
+  //  문서 댓글 (소통 채팅)
+  // ──────────────────────────────────────────────
+
+  /**
+   * 문서 댓글 목록 조회 (시간 오름차순)
+   */
+  getDocumentComments: async (documentId: number): Promise<DocumentCommentResponse[]> => {
+    const response = await apiClient.get<DocumentCommentResponse[]>(
+      `/documents/${documentId}/comments`
+    );
+    return response.data;
+  },
+
+  /**
+   * 문서 댓글 작성
+   */
+  addDocumentComment: async (documentId: number, content: string): Promise<DocumentCommentResponse> => {
+    const response = await apiClient.post<DocumentCommentResponse>(
+      `/documents/${documentId}/comments`,
+      { content }
+    );
+    return response.data;
+  },
+
+  /**
+   * 문서 댓글 삭제
+   */
+  deleteDocumentComment: async (documentId: number, commentId: number): Promise<void> => {
+    await apiClient.delete(`/documents/${documentId}/comments/${commentId}`);
   },
 };
 

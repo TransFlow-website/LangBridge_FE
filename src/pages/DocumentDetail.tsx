@@ -7,6 +7,111 @@ import { StatusBadge } from '../components/StatusBadge';
 import { DocumentState } from '../types/translation';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { formatLastModifiedDateDisplay } from '../utils/dateUtils';
+import { DocumentChat } from '../components/DocumentChat';
+import { termApi } from '../services/termApi';
+
+const WORD_CHAR_REGEX = /[A-Za-z0-9_]/;
+type GlossaryTermPair = { sourceTerm: string; targetTerm: string };
+
+const highlightGlossaryInOriginalIframe = (doc: Document, glossaryTerms: GlossaryTermPair[]) => {
+  if (!doc.body || glossaryTerms.length === 0) return;
+
+  const sortedTerms = [...glossaryTerms]
+    .map((t) => ({ sourceTerm: t.sourceTerm.trim(), targetTerm: t.targetTerm.trim() }))
+    .filter((t) => t.sourceTerm.length > 1 && t.targetTerm.length > 0)
+    .sort((a, b) => b.sourceTerm.length - a.sourceTerm.length);
+
+  if (sortedTerms.length === 0) return;
+
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let current: Node | null = walker.nextNode();
+  while (current) {
+    const parentTag = (current.parentElement?.tagName || '').toLowerCase();
+    if (parentTag !== 'script' && parentTag !== 'style' && current.textContent?.trim()) {
+      textNodes.push(current as Text);
+    }
+    current = walker.nextNode();
+  }
+
+  textNodes.forEach((textNode) => {
+    const source = textNode.textContent || '';
+    const lower = source.toLowerCase();
+    let cursor = 0;
+    const fragment = doc.createDocumentFragment();
+    let matched = false;
+
+    while (cursor < source.length) {
+      let bestStart = -1;
+      let bestEnd = -1;
+      let bestTerm: GlossaryTermPair | null = null;
+
+      for (const term of sortedTerms) {
+        const termLower = term.sourceTerm.toLowerCase();
+        const found = lower.indexOf(termLower, cursor);
+        if (found === -1) continue;
+        const end = found + termLower.length;
+
+        const before = found > 0 ? source[found - 1] : '';
+        const after = end < source.length ? source[end] : '';
+        const leftBoundary = !before || !WORD_CHAR_REGEX.test(before);
+        const rightBoundary = !after || !WORD_CHAR_REGEX.test(after);
+        if (!leftBoundary || !rightBoundary) continue;
+
+        if (bestStart === -1 || found < bestStart || (found === bestStart && bestTerm && term.sourceTerm.length > bestTerm.sourceTerm.length)) {
+          bestStart = found;
+          bestEnd = end;
+          bestTerm = term;
+        }
+      }
+
+      if (bestStart === -1) {
+        fragment.appendChild(doc.createTextNode(source.slice(cursor)));
+        break;
+      }
+
+      if (bestStart > cursor) {
+        fragment.appendChild(doc.createTextNode(source.slice(cursor, bestStart)));
+      }
+
+      const span = doc.createElement('span');
+      span.className = 'original-glossary-term';
+      span.setAttribute('data-source-term', bestTerm?.sourceTerm || '');
+      span.setAttribute('data-target-term', bestTerm?.targetTerm || '');
+      span.textContent = `${source.slice(bestStart, bestEnd)}(${bestTerm?.targetTerm || ''})`;
+      fragment.appendChild(span);
+
+      matched = true;
+      cursor = bestEnd;
+    }
+
+    if (matched) {
+      textNode.replaceWith(fragment);
+    }
+  });
+};
+
+// 과거 버전에서 AI_DRAFT에 삽입된 glossary-term 마크업 제거
+const removeLegacyGlossaryMarkup = (html: string) => {
+  if (!html) return html;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const glossaryNodes = doc.querySelectorAll('span.glossary-term');
+
+    glossaryNodes.forEach((node) => {
+      const original = node.getAttribute('data-original') || '';
+      const text = node.textContent || '';
+      const suffix = original ? `(${original})` : '';
+      const restored = suffix && text.endsWith(suffix) ? text.slice(0, -suffix.length) : text;
+      node.replaceWith(doc.createTextNode(restored));
+    });
+
+    return doc.documentElement.outerHTML;
+  } catch {
+    return html;
+  }
+};
 
 export default function DocumentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -39,6 +144,10 @@ export default function DocumentDetail() {
   const [showHandoverModal, setShowHandoverModal] = useState(false);
   // 번역 대기로 전환 (from=handover 시)
   const [convertingToPending, setConvertingToPending] = useState(false);
+  // 소통 채팅 패널 표시 여부
+  const [showChat, setShowChat] = useState(false);
+  const [showOriginalGlossary, setShowOriginalGlossary] = useState(false);
+  const [originalGlossaryTerms, setOriginalGlossaryTerms] = useState<GlossaryTermPair[]>([]);
 
   // iframe refs
   const originalIframeRef = useRef<HTMLIFrameElement>(null);
@@ -119,6 +228,26 @@ export default function DocumentDetail() {
         const doc = await documentApi.getDocument(documentId);
         setDocument(doc);
 
+        // 원문(Version 0)용 용어집 sourceTerm 로드
+        try {
+          const sourceLangRaw = (doc.sourceLang || '').toUpperCase();
+          const sourceLang = sourceLangRaw === 'AUTO' ? 'EN' : sourceLangRaw;
+          const targetLang = (doc.targetLang || '').toUpperCase();
+          if (sourceLang && targetLang) {
+            const termRes = await termApi.getAllTerms({ sourceLang, targetLang, page: 0, size: 1000 });
+            setOriginalGlossaryTerms(
+              (termRes.content || [])
+                .filter((t) => t.sourceTerm && t.targetTerm)
+                .map((t) => ({ sourceTerm: t.sourceTerm, targetTerm: t.targetTerm }))
+            );
+          } else {
+            setOriginalGlossaryTerms([]);
+          }
+        } catch (e) {
+          console.warn('원문 용어집 로드 실패:', e);
+          setOriginalGlossaryTerms([]);
+        }
+
         // 2. 문서 버전 목록 가져오기
         const versionList = await documentApi.getDocumentVersions(documentId);
         setVersions(versionList);
@@ -171,7 +300,7 @@ export default function DocumentDetail() {
         }
 
         setOriginalHtml(originalVersion?.content || '');
-        setAiDraftHtml(aiDraftVersion?.content || '');
+        setAiDraftHtml(removeLegacyGlossaryMarkup(aiDraftVersion?.content || ''));
         setCurrentVersionHtml(currentVersion?.content || '');
         setCurrentVersionInfo({ 
           version: currentVersion || null, 
@@ -201,7 +330,7 @@ export default function DocumentDetail() {
         iframeDoc.write(originalHtml);
         iframeDoc.close();
 
-        // 경계선 제거 CSS 주입
+        // 경계선 제거 + 원문 용어 표시 CSS 주입
         const style = iframeDoc.createElement('style');
         style.textContent = `
           * {
@@ -211,8 +340,19 @@ export default function DocumentDetail() {
           body {
             cursor: default !important;
           }
+          .original-glossary-term {
+            background-color: #fff4c2;
+            color: #7a4b00;
+            font-weight: 700;
+            border-radius: 3px;
+            padding: 0 2px;
+          }
         `;
         iframeDoc.head.appendChild(style);
+
+        if (showOriginalGlossary) {
+          highlightGlossaryInOriginalIframe(iframeDoc, originalGlossaryTerms);
+        }
 
         // 편집 불가능하게 설정
         if (iframeDoc.body) {
@@ -223,7 +363,7 @@ export default function DocumentDetail() {
         console.error('❌ 원문 iframe 오류:', error);
       }
     }
-  }, [originalHtml, collapsedPanels, fullscreenPanel]);
+  }, [originalHtml, collapsedPanels, fullscreenPanel, showOriginalGlossary, originalGlossaryTerms]);
 
   // AI 초벌 번역 iframe 렌더링
   useEffect(() => {
@@ -513,6 +653,23 @@ export default function DocumentDetail() {
             border: '1px solid #D3D3D3',
           }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: colors.primaryText }}>문서 보기:</span>
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: 500,
+              color: '#7a4b00',
+            }}>
+              <input
+                type="checkbox"
+                checked={showOriginalGlossary}
+                onChange={(e) => setShowOriginalGlossary(e.target.checked)}
+                style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+              />
+              <span>Version 0 용어집 적용 구간 보기</span>
+            </label>
             <label style={{ 
               display: 'flex', 
               alignItems: 'center', 
@@ -581,117 +738,160 @@ export default function DocumentDetail() {
             </label>
           </div>
 
-          {/* 우측: from=handover 시 번역 대기로 전환, 그 외 번역 대기 문서일 때 번역하기 */}
-          {from === 'handover' ? (
-            document?.status !== 'PENDING_TRANSLATION' ? (
+          {/* 우측: 채팅 토글 + 액션 버튼 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* 소통 채팅 토글 */}
+            <button
+              onClick={() => setShowChat(prev => !prev)}
+              title="소통 채팅"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '7px 14px',
+                fontSize: '13px',
+                fontWeight: 500,
+                border: `1px solid ${showChat ? '#3B82F6' : '#D1D5DB'}`,
+                borderRadius: '6px',
+                backgroundColor: showChat ? '#EFF6FF' : '#FFFFFF',
+                color: showChat ? '#3B82F6' : '#374151',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              💬 채팅
+            </button>
+
+            {from === 'handover' ? (
+              document?.status !== 'PENDING_TRANSLATION' ? (
+                <Button
+                  variant="primary"
+                  onClick={handleConvertToPending}
+                  disabled={convertingToPending}
+                  style={{ fontSize: '13px', padding: '8px 20px', whiteSpace: 'nowrap' }}
+                >
+                  {convertingToPending ? '전환 중...' : '번역 대기로 전환'}
+                </Button>
+              ) : (
+                <span style={{ fontSize: '13px', color: '#28A745', fontWeight: 600 }}>전환 완료</span>
+              )
+            ) : document?.status === 'PENDING_TRANSLATION' ? (
               <Button
                 variant="primary"
-                onClick={handleConvertToPending}
-                disabled={convertingToPending}
+                onClick={() => navigate(`/translations/${documentId}/work`)}
                 style={{ fontSize: '13px', padding: '8px 20px', whiteSpace: 'nowrap' }}
               >
-                {convertingToPending ? '전환 중...' : '번역 대기로 전환'}
+                번역하기
               </Button>
-            ) : (
-              <span style={{ fontSize: '13px', color: '#28A745', fontWeight: 600 }}>전환 완료</span>
-            )
-          ) : document?.status === 'PENDING_TRANSLATION' ? (
-            <Button
-              variant="primary"
-              onClick={() => navigate(`/translations/${documentId}/work`)}
-              style={{ fontSize: '13px', padding: '8px 20px', whiteSpace: 'nowrap' }}
-            >
-              번역하기
-            </Button>
-          ) : null}
+            ) : null}
+          </div>
         </div>
 
-        {/* 3단 레이아웃 */}
-        <div style={{ display: 'flex', height: '100%', gap: '4px', padding: '4px' }}>
-          {panels.map(panel => {
-            const isCollapsed = collapsedPanels.has(panel.id);
-            const isFullscreen = fullscreenPanel === panel.id;
-            const isHidden = hasFullscreen && !isFullscreen;
+        {/* 3단 레이아웃 + 채팅 사이드바 */}
+        <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
 
-            // 콘텐츠가 없으면 패널 숨김
-            if (!panel.hasContent) return null;
-            if (isHidden) return null;
+          {/* 문서 패널 영역 */}
+          <div style={{ flex: 1, display: 'flex', gap: '4px', padding: '4px', overflow: 'hidden' }}>
+            {panels.map(panel => {
+              const isCollapsed = collapsedPanels.has(panel.id);
+              const isFullscreen = fullscreenPanel === panel.id;
+              const isHidden = hasFullscreen && !isFullscreen;
 
-            return (
-              <div
-                key={panel.id}
-                style={{
-                  flex: isCollapsed ? '0 0 0' : isFullscreen ? '1' : `1 1 ${100 / visiblePanels.length}%`,
-                  display: isCollapsed ? 'none' : 'flex',
-                  flexDirection: 'column',
-                  transition: 'flex 0.2s ease',
-                  minWidth: isCollapsed ? '0' : '200px',
-                }}
-              >
-                {/* 패널 헤더 */}
+              // 콘텐츠가 없으면 패널 숨김
+              if (!panel.hasContent) return null;
+              if (isHidden) return null;
+
+              return (
                 <div
+                  key={panel.id}
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '8px 12px',
-                    backgroundColor: '#D3D3D3',
-                    borderRadius: '4px 4px 0 0',
-                    cursor: 'default',
-                    height: '36px',
+                    flex: isCollapsed ? '0 0 0' : isFullscreen ? '1' : `1 1 ${100 / visiblePanels.length}%`,
+                    display: isCollapsed ? 'none' : 'flex',
+                    flexDirection: 'column',
+                    transition: 'flex 0.2s ease',
+                    minWidth: isCollapsed ? '0' : '200px',
                   }}
                 >
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#000000' }}>
-                    {panel.title}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                      onClick={() => toggleFullscreen(panel.id)}
+                  {/* 패널 헤더 */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '8px 12px',
+                      backgroundColor: '#D3D3D3',
+                      borderRadius: '4px 4px 0 0',
+                      cursor: 'default',
+                      height: '36px',
+                    }}
+                  >
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#000000' }}>
+                      {panel.title}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button
+                        onClick={() => toggleFullscreen(panel.id)}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          border: '1px solid #A9A9A9',
+                          borderRadius: '3px',
+                          backgroundColor: '#FFFFFF',
+                          color: '#000000',
+                          cursor: 'pointer',
+                          fontWeight: 500,
+                        }}
+                        title={isFullscreen ? '확대 해제' : '전체화면 확대'}
+                      >
+                        {isFullscreen ? '축소' : '확대'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 패널 내용 */}
+                  <div
+                    style={{
+                      flex: 1,
+                      border: '1px solid #C0C0C0',
+                      borderTop: 'none',
+                      borderRadius: '0 0 4px 4px',
+                      overflow: 'hidden',
+                      backgroundColor: '#FFFFFF',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      position: 'relative',
+                    }}
+                  >
+                    <iframe
+                      ref={panel.ref}
+                      title={panel.title}
                       style={{
-                        padding: '4px 8px',
-                        fontSize: '11px',
-                        border: '1px solid #A9A9A9',
-                        borderRadius: '3px',
-                        backgroundColor: '#FFFFFF',
-                        color: '#000000',
-                        cursor: 'pointer',
-                        fontWeight: 500,
+                        width: '100%',
+                        height: '100%',
+                        border: 'none',
                       }}
-                      title={isFullscreen ? '확대 해제' : '전체화면 확대'}
-                    >
-                      {isFullscreen ? '축소' : '확대'}
-                    </button>
+                      sandbox="allow-same-origin allow-scripts"
+                    />
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                {/* 패널 내용 */}
-                <div
-                  style={{
-                    flex: 1,
-                    border: '1px solid #C0C0C0',
-                    borderTop: 'none',
-                    borderRadius: '0 0 4px 4px',
-                    overflow: 'hidden',
-                    backgroundColor: '#FFFFFF',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    position: 'relative',
-                  }}
-                >
-                  <iframe
-                    ref={panel.ref}
-                    title={panel.title}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      border: 'none',
-                    }}
-                    sandbox="allow-same-origin allow-scripts"
-                  />
-                </div>
-              </div>
-            );
-          })}
+          {/* 소통 채팅 사이드바 */}
+          {showChat && documentId && (
+            <div
+              style={{
+                width: '320px',
+                flexShrink: 0,
+                padding: '4px 4px 4px 0',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <DocumentChat documentId={documentId} height="100%" />
+            </div>
+          )}
         </div>
       </div>
 
