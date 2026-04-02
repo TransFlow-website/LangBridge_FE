@@ -13,6 +13,10 @@ export interface TableColumn<T> {
   align?: 'left' | 'center' | 'right';
   /** 헤더 클릭 정렬용 키 (onColumnSort와 함께 사용) */
   sortKey?: string;
+  /** 헤더 셀 래퍼에 합침 (열 사이만 좁히려면 음수 marginLeft 등) */
+  headerCellStyle?: React.CSSProperties;
+  /** 본문 셀 래퍼에 합침 */
+  cellStyle?: React.CSSProperties;
 }
 
 interface TableProps<T> {
@@ -34,6 +38,10 @@ interface TableProps<T> {
   compact?: boolean;
   /** 열 사이 간격 (예: '0.25rem'). 지정 시 compact보다 우선 */
   columnGap?: string;
+  /** 헤더 행 패딩. 지정 시 compact 기본값 무시 */
+  headerPadding?: string;
+  /** 데이터 행 패딩. 지정 시 compact 기본값 무시 */
+  rowPadding?: string;
 }
 
 export function Table<T extends { id: number | string }>({
@@ -49,12 +57,16 @@ export function Table<T extends { id: number | string }>({
   plainRowStyle = false,
   compact = false,
   columnGap: columnGapProp,
+  headerPadding: headerPaddingProp,
+  rowPadding: rowPaddingProp,
 }: TableProps<T>) {
   const gridTemplateColumns = columns.map((col) => col.width || '1fr').join(' ');
   const cellGap =
     columnGapProp ?? (compact ? '1px' : '0.5rem');
-  const headerPadding = compact ? '0.3125rem 0.5rem' : '0.75rem 1rem';
-  const rowPadding = compact ? '0.3125rem 0.5rem' : '1rem';
+  const headerPadding =
+    headerPaddingProp ?? (compact ? '0.3125rem 0.5rem' : '0.75rem 1rem');
+  const rowPadding =
+    rowPaddingProp ?? (compact ? '0.3125rem 0.5rem' : '1rem');
   const compactFont = compact ? '0.75rem' : '0.8125rem';
 
   return (
@@ -180,7 +192,7 @@ export function Table<T extends { id: number | string }>({
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '6px',
+                    gap: '4px',
                     background: 'transparent',
                     border: 'none',
                     padding: '2px 0',
@@ -213,6 +225,7 @@ export function Table<T extends { id: number | string }>({
                   alignItems: 'center',
                   justifyContent: justify,
                   minWidth: 0,
+                  ...col.headerCellStyle,
                 }}
               >
                 {headerContent}
@@ -276,6 +289,7 @@ export function Table<T extends { id: number | string }>({
                           ca === 'right' ? 'flex-end' : ca === 'center' ? 'center' : 'flex-start',
                         minWidth: 0,
                         overflow: 'hidden',
+                        ...col.cellStyle,
                       }}
                     >
                       {col.render(item, index)}

@@ -1,4 +1,5 @@
 import type React from "react";
+import type { CSSProperties } from "react";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -11,7 +12,7 @@ import {
 	type DocumentSortOption,
 } from "../types/document";
 import { DocumentState } from "../types/translation";
-import { colors } from "../constants/designTokens";
+import { colors, formFieldLightStyle } from "../constants/designTokens";
 import { Button } from "../components/Button";
 import { documentApi, type DocumentResponse } from "../services/documentApi";
 import { categoryApi, type CategoryResponse } from "../services/categoryApi";
@@ -49,6 +50,26 @@ const statusChipStyles: Record<
 	"검토 중": { bg: "#EDE9FE", text: "#5B21B6", border: "#C4B5FD" },
 	"승인 완료": { bg: "#D1FAE5", text: "#047857", border: "#6EE7B7" },
 	"게시 완료": { bg: "#CCFBF1", text: "#0F766E", border: "#5EEAD4" },
+};
+
+/** 전체 문서 테이블: 열 gap·가로 패딩만 촘촘. 세로 패딩은 Table 기본(수정 전)과 동일 */
+const DOCUMENTS_TABLE_COLUMN_GAP = "2px";
+const DOCUMENTS_TABLE_HEADER_PADDING = "0.75rem 0.1rem";
+const DOCUMENTS_TABLE_ROW_PADDING = "1rem 0.1rem";
+/** 문서 제목 열 최대 너비(그리드 트랙) — 넘치면 … */
+const DOCUMENTS_TITLE_COL_MAX = "minmax(0, 478px)";
+/** 문서 제목 ↔ 카테고리 사이 여유 */
+const DOCUMENTS_TITLE_CELL_OUTER: CSSProperties = { paddingRight: "0.7rem" };
+/** 최근 수정 ↔ 담당 관리자 사이 여유 */
+const DOCUMENTS_LAST_MODIFIED_CELL_OUTER: CSSProperties = {
+	paddingRight: "0.55rem",
+};
+const DOCUMENTS_ASSIGNED_MANAGER_CELL_OUTER: CSSProperties = {
+	paddingLeft: "0.5rem",
+};
+/** 작업자 열 바로 다음(현재 버전)을 왼쪽으로 당겨 작업자와 붙임 — Table.cellStyle용 */
+const DOCUMENTS_TIGHTEN_AFTER_WORKER_COL: CSSProperties = {
+	marginLeft: "-2.35rem",
 };
 
 function getSourceLabel(originalUrl?: string): string | null {
@@ -215,8 +236,10 @@ export default function Documents() {
 	);
 	const [generatedCopyCountBySourceId, setGeneratedCopyCountBySourceId] =
 		useState<Map<number, number>>(new Map());
-	const [inTranslationCopyCountBySourceId, setInTranslationCopyCountBySourceId] =
-		useState<Map<number, number>>(new Map());
+	const [
+		inTranslationCopyCountBySourceId,
+		setInTranslationCopyCountBySourceId,
+	] = useState<Map<number, number>>(new Map());
 	const [copyWorkersBySourceId, setCopyWorkersBySourceId] = useState<
 		Map<number, string[]>
 	>(new Map());
@@ -466,7 +489,9 @@ export default function Documents() {
 						"게시 완료": DocumentState.PUBLISHED,
 					};
 					if (st === "번역 중") {
-						return (inTranslationCopyCountBySourceId.get(Number(doc.id)) ?? 0) > 0;
+						return (
+							(inTranslationCopyCountBySourceId.get(Number(doc.id)) ?? 0) > 0
+						);
 					}
 					return doc.status === statusMap[st];
 				});
@@ -953,7 +978,7 @@ export default function Documents() {
 	const expandColumn: TableColumn<RowItem> = {
 		key: "expand",
 		label: "",
-		width: "36px",
+		width: "32px",
 		render: (item) => {
 			if (item.isCopyRow || (item as RowItem).isLoadingRow) {
 				return (
@@ -1004,7 +1029,7 @@ export default function Documents() {
 		key: "createdAtOrder",
 		label: "N",
 		sortKey: "createdAt",
-		width: "42px",
+		width: "36px",
 		align: "center",
 		render: (item) => {
 			const row = item as RowItem;
@@ -1037,7 +1062,7 @@ export default function Documents() {
 		key: "generatedCopyCount",
 		label: "생성 문서",
 		sortKey: "generatedCopyCount",
-		width: "74px",
+		width: "70px",
 		align: "center",
 		render: (item) => {
 			const row = item as RowItem;
@@ -1080,7 +1105,9 @@ export default function Documents() {
 			key: "title",
 			label: "문서 제목",
 			sortKey: "title",
-			width: "minmax(0, 3fr)",
+			width: DOCUMENTS_TITLE_COL_MAX,
+			headerCellStyle: DOCUMENTS_TITLE_CELL_OUTER,
+			cellStyle: DOCUMENTS_TITLE_CELL_OUTER,
 			render: (item) => {
 				if ((item as RowItem).isLoadingRow) {
 					return (
@@ -1105,9 +1132,10 @@ export default function Documents() {
 						style={{
 							display: "flex",
 							alignItems: "center",
-							gap: "8px",
+							gap: "4px",
 							paddingLeft: item.isCopyRow ? 24 : 0,
 							minWidth: 0,
+							maxWidth: "100%",
 							overflow: "hidden",
 						}}
 					>
@@ -1120,11 +1148,11 @@ export default function Documents() {
 									border: "none",
 									cursor: isFavoritePending ? "not-allowed" : "pointer",
 									opacity: isFavoritePending ? 0.55 : 1,
-									padding: "4px",
+									padding: "2px",
 									display: "flex",
 									alignItems: "center",
 									flexShrink: 0,
-									fontSize: "18px",
+									fontSize: "16px",
 									color: isFavorite ? "#FFD700" : "#C0C0C0",
 									transition: "color 0.2s",
 								}}
@@ -1155,11 +1183,11 @@ export default function Documents() {
 								fontStyle: isDraftOnly && !item.isCopyRow ? "italic" : "normal",
 								minWidth: 0,
 								flex: "1 1 auto",
-								whiteSpace: "normal",
-								overflow: "visible",
+								overflow: "hidden",
+								textOverflow: "ellipsis",
+								whiteSpace: "nowrap",
 								display: "block",
 								lineHeight: 1.2,
-								wordBreak: "break-word",
 							}}
 							title={item.title}
 						>
@@ -1202,7 +1230,7 @@ export default function Documents() {
 		{
 			key: "category",
 			label: "카테고리",
-			width: "minmax(0, 0.6fr)",
+			width: "minmax(0, 0.5fr)",
 			render: (item) => (
 				<span style={{ color: colors.primaryText, fontSize: "12px" }}>
 					{(item as RowItem).isLoadingRow ? "-" : item.category}
@@ -1212,7 +1240,7 @@ export default function Documents() {
 		{
 			key: "status",
 			label: "상태",
-			width: "minmax(0, 0.7fr)",
+			width: "minmax(0, 0.38fr)",
 			render: (item) => {
 				if ((item as RowItem).isLoadingRow)
 					return (
@@ -1295,10 +1323,19 @@ export default function Documents() {
 			key: "lastModified",
 			label: "최근 수정",
 			sortKey: "lastModified",
-			width: "minmax(0, 0.85fr)",
+			/* 하이픈(2026-03-30)에서 줄바꿈되지 않도록 최소 너비 + 한 줄 고정 */
+			width: "minmax(9.5rem, 0.34fr)",
 			align: "right",
+			headerCellStyle: DOCUMENTS_LAST_MODIFIED_CELL_OUTER,
+			cellStyle: DOCUMENTS_LAST_MODIFIED_CELL_OUTER,
 			render: (item) => (
-				<span style={{ color: colors.primaryText, fontSize: "12px" }}>
+				<span
+					style={{
+						color: colors.primaryText,
+						fontSize: "12px",
+						whiteSpace: "nowrap",
+					}}
+				>
 					{(item as RowItem).isLoadingRow ? "-" : item.lastModified || "-"}
 				</span>
 			),
@@ -1306,7 +1343,9 @@ export default function Documents() {
 		{
 			key: "assignedManager",
 			label: "담당 관리자",
-			width: "minmax(0, 0.7fr)",
+			width: "minmax(0, 0.58fr)",
+			headerCellStyle: DOCUMENTS_ASSIGNED_MANAGER_CELL_OUTER,
+			cellStyle: DOCUMENTS_ASSIGNED_MANAGER_CELL_OUTER,
 			render: (item) => (
 				<span style={{ color: colors.primaryText, fontSize: "12px" }}>
 					{(item as RowItem).isLoadingRow ? "-" : item.assignedManager || "-"}
@@ -1316,7 +1355,7 @@ export default function Documents() {
 		{
 			key: "lockStatus",
 			label: "작업자",
-			width: "minmax(0, 0.6fr)",
+			width: "minmax(0, 4rem)",
 			render: (item) => {
 				if ((item as RowItem).isLoadingRow)
 					return (
@@ -1331,7 +1370,18 @@ export default function Documents() {
 						</span>
 					);
 				return (
-					<span style={{ color: colors.primaryText, fontSize: "12px" }}>
+					<span
+						style={{
+							color: colors.primaryText,
+							fontSize: "12px",
+							overflow: "hidden",
+							textOverflow: "ellipsis",
+							whiteSpace: "nowrap",
+							minWidth: 0,
+							maxWidth: "100%",
+						}}
+						title={item.currentWorker || undefined}
+					>
 						{item.currentWorker || "-"}
 					</span>
 				);
@@ -1340,8 +1390,10 @@ export default function Documents() {
 		{
 			key: "currentVersion",
 			label: "현재 버전",
-			width: "minmax(0, 0.5fr)",
+			width: "minmax(0, 0.42fr)",
 			align: "right",
+			headerCellStyle: DOCUMENTS_TIGHTEN_AFTER_WORKER_COL,
+			cellStyle: DOCUMENTS_TIGHTEN_AFTER_WORKER_COL,
 			render: (item) => {
 				if ((item as RowItem).isLoadingRow)
 					return (
@@ -1370,7 +1422,7 @@ export default function Documents() {
 			key: "estimatedLength",
 			label: "예상 분량",
 			sortKey: "estimatedLength",
-			width: "minmax(0, 0.65fr)",
+			width: "minmax(0, 0.55fr)",
 			align: "right",
 			render: (item) => (
 				<span style={{ color: colors.primaryText, fontSize: "12px" }}>
@@ -1385,7 +1437,7 @@ export default function Documents() {
 		{
 			key: "action",
 			label: "액션",
-			width: "260px",
+			width: "220px",
 			align: "right",
 			render: (item) => {
 				if ((item as RowItem).isLoadingRow)
@@ -1396,7 +1448,7 @@ export default function Documents() {
 					);
 				return (
 					<div
-						style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}
+						style={{ display: "flex", gap: "4px", justifyContent: "flex-end" }}
 					>
 						<Button
 							variant="secondary"
@@ -1404,7 +1456,7 @@ export default function Documents() {
 								e?.stopPropagation();
 								navigate(`/documents/${item.id}`);
 							}}
-							style={{ fontSize: "12px", padding: "6px 12px" }}
+							style={{ fontSize: "11px", padding: "5px 8px" }}
 						>
 							상세보기
 						</Button>
@@ -1414,7 +1466,7 @@ export default function Documents() {
 								e?.stopPropagation();
 								handleManage(item as DocumentListItem);
 							}}
-							style={{ fontSize: "12px", padding: "6px 12px" }}
+							style={{ fontSize: "11px", padding: "5px 8px" }}
 						>
 							관리
 						</Button>
@@ -1424,7 +1476,7 @@ export default function Documents() {
 								e?.stopPropagation();
 								handleExport(item as DocumentListItem);
 							}}
-							style={{ fontSize: "12px", padding: "6px 12px" }}
+							style={{ fontSize: "11px", padding: "5px 8px" }}
 						>
 							내보내기
 						</Button>
@@ -1817,6 +1869,9 @@ export default function Documents() {
 				) : (
 					<Table
 						columns={columns}
+						columnGap={DOCUMENTS_TABLE_COLUMN_GAP}
+						headerPadding={DOCUMENTS_TABLE_HEADER_PADDING}
+						rowPadding={DOCUMENTS_TABLE_ROW_PADDING}
 						data={tableData}
 						onRowClick={(item) => {
 							if ((item as RowItem).isLoadingRow) return;
@@ -1975,8 +2030,8 @@ export default function Documents() {
 											border: `1px solid ${colors.border}`,
 											borderRadius: "4px",
 											fontSize: "14px",
-											color: "#000",
 											boxSizing: "border-box",
+											...formFieldLightStyle,
 										}}
 									/>
 								</div>
@@ -2006,9 +2061,8 @@ export default function Documents() {
 											border: `1px solid ${colors.border}`,
 											borderRadius: "4px",
 											fontSize: "14px",
-											color: "#000",
-											backgroundColor: "#fff",
 											boxSizing: "border-box",
+											...formFieldLightStyle,
 										}}
 									>
 										<option value="">미분류</option>

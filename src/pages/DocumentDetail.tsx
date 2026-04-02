@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { documentApi, DocumentResponse, DocumentVersionResponse } from '../services/documentApi';
 import { colors } from '../constants/designTokens';
 import { Button } from '../components/Button';
@@ -148,11 +149,17 @@ export default function DocumentDetail() {
   const [showChat, setShowChat] = useState(false);
   const [showOriginalGlossary, setShowOriginalGlossary] = useState(false);
   const [originalGlossaryTerms, setOriginalGlossaryTerms] = useState<GlossaryTermPair[]>([]);
+  /** 헤더 제목·원문 URL 길게/짧게 보기 */
+  const [headerMetaExpanded, setHeaderMetaExpanded] = useState(false);
 
   // iframe refs
   const originalIframeRef = useRef<HTMLIFrameElement>(null);
   const aiDraftIframeRef = useRef<HTMLIFrameElement>(null);
   const currentWorkIframeRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    setHeaderMetaExpanded(false);
+  }, [id]);
 
   // 패널 토글
   const togglePanel = (panelId: string) => {
@@ -571,10 +578,22 @@ export default function DocumentDetail() {
             justifyContent: 'space-between',
             alignItems: 'center',
             gap: '16px',
+            minWidth: 0,
+            maxWidth: '100%',
+            boxSizing: 'border-box',
           }}
         >
-          {/* 왼쪽: 뒤로가기 + 문서 정보 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1 }}>
+          {/* 왼쪽: 뒤로가기 + 문서 정보 (minWidth:0으로 flex 안에서 줄어들 수 있게) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
+            }}
+          >
             <Button
               variant="secondary"
               onClick={() => navigate(
@@ -584,48 +603,192 @@ export default function DocumentDetail() {
                 : from === 'handover' ? '/documents/handovers'
                 : '/documents'
               )}
-              style={{ fontSize: '12px', padding: '6px 12px' }}
+              style={{ fontSize: '12px', padding: '6px 12px', flexShrink: 0 }}
             >
               ← 뒤로가기
             </Button>
 
             {document && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  minWidth: 0,
+                  flex: 1,
+                  overflow: 'hidden',
+                }}
+              >
                 {document.latestHandover && from === 'handover' && (
                   <Button
                     variant="secondary"
                     onClick={() => setShowHandoverModal(true)}
-                    style={{ fontSize: '12px', padding: '6px 12px', whiteSpace: 'nowrap', borderColor: '#FFB300', color: '#B8860B', backgroundColor: '#FFFDE7' }}
+                    style={{ fontSize: '12px', padding: '6px 12px', whiteSpace: 'nowrap', flexShrink: 0, borderColor: '#FFB300', color: '#B8860B', backgroundColor: '#FFFDE7' }}
                   >
                     📋 인계 메모 확인
                   </Button>
                 )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <div style={{ fontSize: '12px', color: colors.secondaryText, marginBottom: '2px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '2px',
+                    minWidth: 0,
+                    flex: 1,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      color: colors.secondaryText,
+                      marginBottom: '2px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     최근 수정: {formatLastModifiedDateDisplay(document.updatedAt) || '-'}
                   </div>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#000000' }}>
-                  {document.title}
-                </div>
-                {document.originalUrl?.trim() && (
-                  <div style={{ marginTop: '2px' }}>
-                    <a
-                      href={document.originalUrl.trim()}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '6px',
+                    minWidth: 0,
+                  }}
+                >
+                  <div
+                    id="document-detail-header-meta"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      maxHeight: headerMetaExpanded ? 'min(32vh, 240px)' : undefined,
+                      overflowY: headerMetaExpanded ? 'auto' : 'hidden',
+                      overflowX: 'hidden',
+                    }}
+                  >
+                    <div
                       style={{
-                        fontSize: '12px',
-                        color: '#2563eb',
-                        textDecoration: 'none',
-                        wordBreak: 'break-all',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        color: '#000000',
+                        minWidth: 0,
+                        ...(headerMetaExpanded
+                          ? {
+                              whiteSpace: 'normal',
+                              wordBreak: 'break-word',
+                            }
+                          : {
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }),
                       }}
+                      title={headerMetaExpanded ? undefined : document.title}
                     >
-                      원문 URL: {document.originalUrl.trim()}
-                    </a>
+                      {document.title}
+                    </div>
+                    {document.originalUrl?.trim() && (
+                      <div
+                        style={{
+                          marginTop: '6px',
+                          display: 'flex',
+                          alignItems: headerMetaExpanded ? 'flex-start' : 'center',
+                          gap: '6px',
+                          minWidth: 0,
+                          maxWidth: '100%',
+                          flexDirection: headerMetaExpanded ? 'column' : 'row',
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: '12px',
+                            color: colors.secondaryText,
+                            flexShrink: 0,
+                          }}
+                        >
+                          원문 URL:
+                        </span>
+                        <a
+                          href={document.originalUrl.trim()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={
+                            headerMetaExpanded
+                              ? undefined
+                              : document.originalUrl.trim()
+                          }
+                          style={{
+                            fontSize: '12px',
+                            color: '#2563eb',
+                            textDecoration: 'none',
+                            minWidth: 0,
+                            ...(headerMetaExpanded
+                              ? {
+                                  wordBreak: 'break-all',
+                                  whiteSpace: 'normal',
+                                }
+                              : {
+                                  flex: 1,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }),
+                          }}
+                        >
+                          {document.originalUrl.trim()}
+                        </a>
+                      </div>
+                    )}
                   </div>
-                )}
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', color: colors.secondaryText }}>
+                  <button
+                    type="button"
+                    aria-expanded={headerMetaExpanded}
+                    aria-controls="document-detail-header-meta"
+                    title={headerMetaExpanded ? '짧게 보기' : '길게 보기'}
+                    onClick={() => setHeaderMetaExpanded((v) => !v)}
+                    style={{
+                      flexShrink: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '28px',
+                      height: '28px',
+                      padding: 0,
+                      marginTop: '1px',
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: '6px',
+                      backgroundColor: colors.surface,
+                      color: colors.primaryText,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {headerMetaExpanded ? (
+                      <ChevronUp size={18} strokeWidth={2} aria-hidden />
+                    ) : (
+                      <ChevronDown size={18} strokeWidth={2} aria-hidden />
+                    )}
+                  </button>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '12px',
+                    alignItems: 'center',
+                    minWidth: 0,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: colors.secondaryText,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     {document.categoryId ? `카테고리 ${document.categoryId}` : '미분류'} · {
                       currentVersionInfo.version 
                         ? currentVersionInfo.version.isFinal === true || currentVersionInfo.versionType === 'FINAL'
@@ -651,6 +814,7 @@ export default function DocumentDetail() {
             backgroundColor: '#F8F9FA',
             borderRadius: '6px',
             border: '1px solid #D3D3D3',
+            flexShrink: 0,
           }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: colors.primaryText }}>문서 보기:</span>
             <label style={{
@@ -739,7 +903,7 @@ export default function DocumentDetail() {
           </div>
 
           {/* 우측: 채팅 토글 + 액션 버튼 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
             {/* 소통 채팅 토글 */}
             <button
               onClick={() => setShowChat(prev => !prev)}
