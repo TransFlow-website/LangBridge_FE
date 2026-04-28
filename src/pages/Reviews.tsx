@@ -256,11 +256,12 @@ export default function Reviews() {
     {
       key: 'action',
       label: '',
-      width: '13%',
-      align: 'right',
+      width: '96px',
+      align: 'center',
+      cellStyle: { overflow: 'visible' },
       render: (item) => {
         return (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
             <Button
               variant="primary"
               onClick={(e) => {
@@ -271,7 +272,9 @@ export default function Reviews() {
               }}
               style={{ 
                 fontSize: '12px', 
-                padding: '6px 12px',
+                padding: '6px 10px',
+                minWidth: '74px',
+                whiteSpace: 'nowrap',
               }}
             >
               검토하기

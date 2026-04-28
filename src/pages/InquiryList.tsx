@@ -74,16 +74,23 @@ export default function InquiryList() {
             )}
           </h1>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: colors.border }}>
+            <div
+              className="inline-flex items-center rounded-xl border p-1"
+              style={{ borderColor: colors.border, backgroundColor: colors.surface }}
+            >
               <button
                 type="button"
                 onClick={() => {
                   setMineOnly(false);
                   setPage(0);
                 }}
-                className="px-3 py-1.5 text-sm"
+                aria-pressed={!mineOnly}
+                className={`px-4 py-2 text-sm rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                  !mineOnly ? 'shadow-sm' : 'text-gray-600 hover:bg-white/60'
+                }`}
                 style={{
-                  backgroundColor: !mineOnly ? menuStatesActive : 'transparent',
+                  backgroundColor: !mineOnly ? 'rgba(59, 130, 246, 0.16)' : 'transparent',
+                  color: !mineOnly ? '#1d4ed8' : '#4b5563',
                   fontFamily: typography.fontFamily,
                 }}
               >
@@ -95,9 +102,13 @@ export default function InquiryList() {
                   setMineOnly(true);
                   setPage(0);
                 }}
-                className="px-3 py-1.5 text-sm"
+                aria-pressed={mineOnly}
+                className={`px-4 py-2 text-sm rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                  mineOnly ? 'shadow-sm' : 'text-gray-600 hover:bg-white/60'
+                }`}
                 style={{
-                  backgroundColor: mineOnly ? menuStatesActive : 'transparent',
+                  backgroundColor: mineOnly ? 'rgba(59, 130, 246, 0.16)' : 'transparent',
+                  color: mineOnly ? '#1d4ed8' : '#4b5563',
                   fontFamily: typography.fontFamily,
                 }}
               >
@@ -218,5 +229,3 @@ export default function InquiryList() {
     </div>
   );
 }
-
-const menuStatesActive = 'rgba(169, 169, 169, 0.35)';

@@ -1,345 +1,418 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { documentApi, DocumentResponse, DocumentVersionResponse } from '../services/documentApi';
-import { colors } from '../constants/designTokens';
-import { Button } from '../components/Button';
-import { StatusBadge } from '../components/StatusBadge';
-import { DocumentState } from '../types/translation';
-import ErrorBoundary from '../components/ErrorBoundary';
-import { formatLastModifiedDateDisplay } from '../utils/dateUtils';
-import { DocumentChat } from '../components/DocumentChat';
-import { termApi } from '../services/termApi';
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import {
+	documentApi,
+	type DocumentResponse,
+	type DocumentVersionResponse,
+} from "../services/documentApi";
+import { colors } from "../constants/designTokens";
+import { Button } from "../components/Button";
+import { StatusBadge } from "../components/StatusBadge";
+import { DocumentState } from "../types/translation";
+import ErrorBoundary from "../components/ErrorBoundary";
+import { formatLastModifiedDateDisplay } from "../utils/dateUtils";
+import { DocumentChat } from "../components/DocumentChat";
+import { termApi } from "../services/termApi";
 
 const WORD_CHAR_REGEX = /[A-Za-z0-9_]/;
 type GlossaryTermPair = { sourceTerm: string; targetTerm: string };
 
-const highlightGlossaryInOriginalIframe = (doc: Document, glossaryTerms: GlossaryTermPair[]) => {
-  if (!doc.body || glossaryTerms.length === 0) return;
+const highlightGlossaryInOriginalIframe = (
+	doc: Document,
+	glossaryTerms: GlossaryTermPair[],
+) => {
+	if (!doc.body || glossaryTerms.length === 0) return;
 
-  const sortedTerms = [...glossaryTerms]
-    .map((t) => ({ sourceTerm: t.sourceTerm.trim(), targetTerm: t.targetTerm.trim() }))
-    .filter((t) => t.sourceTerm.length > 1 && t.targetTerm.length > 0)
-    .sort((a, b) => b.sourceTerm.length - a.sourceTerm.length);
+	const sortedTerms = [...glossaryTerms]
+		.map((t) => ({
+			sourceTerm: t.sourceTerm.trim(),
+			targetTerm: t.targetTerm.trim(),
+		}))
+		.filter((t) => t.sourceTerm.length > 1 && t.targetTerm.length > 0)
+		.sort((a, b) => b.sourceTerm.length - a.sourceTerm.length);
 
-  if (sortedTerms.length === 0) return;
+	if (sortedTerms.length === 0) return;
 
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
-  const textNodes: Text[] = [];
-  let current: Node | null = walker.nextNode();
-  while (current) {
-    const parentTag = (current.parentElement?.tagName || '').toLowerCase();
-    if (parentTag !== 'script' && parentTag !== 'style' && current.textContent?.trim()) {
-      textNodes.push(current as Text);
-    }
-    current = walker.nextNode();
-  }
+	const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+	const textNodes: Text[] = [];
+	let current: Node | null = walker.nextNode();
+	while (current) {
+		const parentTag = (current.parentElement?.tagName || "").toLowerCase();
+		if (
+			parentTag !== "script" &&
+			parentTag !== "style" &&
+			current.textContent?.trim()
+		) {
+			textNodes.push(current as Text);
+		}
+		current = walker.nextNode();
+	}
 
-  textNodes.forEach((textNode) => {
-    const source = textNode.textContent || '';
-    const lower = source.toLowerCase();
-    let cursor = 0;
-    const fragment = doc.createDocumentFragment();
-    let matched = false;
+	textNodes.forEach((textNode) => {
+		const source = textNode.textContent || "";
+		const lower = source.toLowerCase();
+		let cursor = 0;
+		const fragment = doc.createDocumentFragment();
+		let matched = false;
 
-    while (cursor < source.length) {
-      let bestStart = -1;
-      let bestEnd = -1;
-      let bestTerm: GlossaryTermPair | null = null;
+		while (cursor < source.length) {
+			let bestStart = -1;
+			let bestEnd = -1;
+			let bestTerm: GlossaryTermPair | null = null;
 
-      for (const term of sortedTerms) {
-        const termLower = term.sourceTerm.toLowerCase();
-        const found = lower.indexOf(termLower, cursor);
-        if (found === -1) continue;
-        const end = found + termLower.length;
+			for (const term of sortedTerms) {
+				const termLower = term.sourceTerm.toLowerCase();
+				const found = lower.indexOf(termLower, cursor);
+				if (found === -1) continue;
+				const end = found + termLower.length;
 
-        const before = found > 0 ? source[found - 1] : '';
-        const after = end < source.length ? source[end] : '';
-        const leftBoundary = !before || !WORD_CHAR_REGEX.test(before);
-        const rightBoundary = !after || !WORD_CHAR_REGEX.test(after);
-        if (!leftBoundary || !rightBoundary) continue;
+				const before = found > 0 ? source[found - 1] : "";
+				const after = end < source.length ? source[end] : "";
+				const leftBoundary = !before || !WORD_CHAR_REGEX.test(before);
+				const rightBoundary = !after || !WORD_CHAR_REGEX.test(after);
+				if (!leftBoundary || !rightBoundary) continue;
 
-        if (bestStart === -1 || found < bestStart || (found === bestStart && bestTerm && term.sourceTerm.length > bestTerm.sourceTerm.length)) {
-          bestStart = found;
-          bestEnd = end;
-          bestTerm = term;
-        }
-      }
+				if (
+					bestStart === -1 ||
+					found < bestStart ||
+					(found === bestStart &&
+						bestTerm &&
+						term.sourceTerm.length > bestTerm.sourceTerm.length)
+				) {
+					bestStart = found;
+					bestEnd = end;
+					bestTerm = term;
+				}
+			}
 
-      if (bestStart === -1) {
-        fragment.appendChild(doc.createTextNode(source.slice(cursor)));
-        break;
-      }
+			if (bestStart === -1) {
+				fragment.appendChild(doc.createTextNode(source.slice(cursor)));
+				break;
+			}
 
-      if (bestStart > cursor) {
-        fragment.appendChild(doc.createTextNode(source.slice(cursor, bestStart)));
-      }
+			if (bestStart > cursor) {
+				fragment.appendChild(
+					doc.createTextNode(source.slice(cursor, bestStart)),
+				);
+			}
 
-      const span = doc.createElement('span');
-      span.className = 'original-glossary-term';
-      span.setAttribute('data-source-term', bestTerm?.sourceTerm || '');
-      span.setAttribute('data-target-term', bestTerm?.targetTerm || '');
-      span.textContent = `${source.slice(bestStart, bestEnd)}(${bestTerm?.targetTerm || ''})`;
-      fragment.appendChild(span);
+			const span = doc.createElement("span");
+			span.className = "original-glossary-term";
+			span.setAttribute("data-source-term", bestTerm?.sourceTerm || "");
+			span.setAttribute("data-target-term", bestTerm?.targetTerm || "");
+			span.textContent = `${source.slice(bestStart, bestEnd)}(${bestTerm?.targetTerm || ""})`;
+			fragment.appendChild(span);
 
-      matched = true;
-      cursor = bestEnd;
-    }
+			matched = true;
+			cursor = bestEnd;
+		}
 
-    if (matched) {
-      textNode.replaceWith(fragment);
-    }
-  });
+		if (matched) {
+			textNode.replaceWith(fragment);
+		}
+	});
 };
 
 // 과거 버전에서 AI_DRAFT에 삽입된 glossary-term 마크업 제거
 const removeLegacyGlossaryMarkup = (html: string) => {
-  if (!html) return html;
-  try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const glossaryNodes = doc.querySelectorAll('span.glossary-term');
+	if (!html) return html;
+	try {
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(html, "text/html");
+		const glossaryNodes = doc.querySelectorAll("span.glossary-term");
 
-    glossaryNodes.forEach((node) => {
-      const original = node.getAttribute('data-original') || '';
-      const text = node.textContent || '';
-      const suffix = original ? `(${original})` : '';
-      const restored = suffix && text.endsWith(suffix) ? text.slice(0, -suffix.length) : text;
-      node.replaceWith(doc.createTextNode(restored));
-    });
+		glossaryNodes.forEach((node) => {
+			const original = node.getAttribute("data-original") || "";
+			const text = node.textContent || "";
+			const suffix = original ? `(${original})` : "";
+			const restored =
+				suffix && text.endsWith(suffix) ? text.slice(0, -suffix.length) : text;
+			node.replaceWith(doc.createTextNode(restored));
+		});
 
-    return doc.documentElement.outerHTML;
-  } catch {
-    return html;
-  }
+		return doc.documentElement.outerHTML;
+	} catch {
+		return html;
+	}
 };
 
 export default function DocumentDetail() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const from = searchParams.get('from');
-  const documentId = id ? parseInt(id, 10) : null;
+	const { id } = useParams<{ id: string }>();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
+	const from = searchParams.get("from");
+	const documentId = id ? Number.parseInt(id, 10) : null;
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [document, setDocument] = useState<DocumentResponse | null>(null);
-  const [versions, setVersions] = useState<DocumentVersionResponse[]>([]);
-  
-  // 버전별 HTML 콘텐츠
-  const [originalHtml, setOriginalHtml] = useState<string>('');
-  const [aiDraftHtml, setAiDraftHtml] = useState<string>('');
-  const [currentVersionHtml, setCurrentVersionHtml] = useState<string>('');
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
+	const [document, setDocument] = useState<DocumentResponse | null>(null);
+	const [versions, setVersions] = useState<DocumentVersionResponse[]>([]);
 
-  // 패널 접기/전체화면 상태
-  const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(new Set());
-  const [fullscreenPanel, setFullscreenPanel] = useState<string | null>(null);
-  
-  // 현재 버전 정보
-  const [currentVersionInfo, setCurrentVersionInfo] = useState<{
-    version: DocumentVersionResponse | null;
-    versionType: string;
-  }>({ version: null, versionType: '' });
+	// 버전별 HTML 콘텐츠
+	const [originalHtml, setOriginalHtml] = useState<string>("");
+	const [aiDraftHtml, setAiDraftHtml] = useState<string>("");
+	const [currentVersionHtml, setCurrentVersionHtml] = useState<string>("");
 
-  // 인계 메모 모달
-  const [showHandoverModal, setShowHandoverModal] = useState(false);
-  // 번역 대기로 전환 (from=handover 시)
-  const [convertingToPending, setConvertingToPending] = useState(false);
-  // 소통 채팅 패널 표시 여부
-  const [showChat, setShowChat] = useState(false);
-  const [showOriginalGlossary, setShowOriginalGlossary] = useState(false);
-  const [originalGlossaryTerms, setOriginalGlossaryTerms] = useState<GlossaryTermPair[]>([]);
-  /** 헤더 제목·원문 URL 길게/짧게 보기 */
-  const [headerMetaExpanded, setHeaderMetaExpanded] = useState(false);
+	// 패널 접기/전체화면 상태
+	const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(
+		new Set(),
+	);
+	const [fullscreenPanel, setFullscreenPanel] = useState<string | null>(null);
 
-  // iframe refs
-  const originalIframeRef = useRef<HTMLIFrameElement>(null);
-  const aiDraftIframeRef = useRef<HTMLIFrameElement>(null);
-  const currentWorkIframeRef = useRef<HTMLIFrameElement>(null);
+	// 현재 버전 정보
+	const [currentVersionInfo, setCurrentVersionInfo] = useState<{
+		version: DocumentVersionResponse | null;
+		versionType: string;
+	}>({ version: null, versionType: "" });
 
-  useEffect(() => {
-    setHeaderMetaExpanded(false);
-  }, [id]);
+	// 인계 메모 모달
+	const [showHandoverModal, setShowHandoverModal] = useState(false);
+	// 번역 대기로 전환 (from=handover 시)
+	const [convertingToPending, setConvertingToPending] = useState(false);
+	// 소통 채팅 패널 표시 여부
+	const [showChat, setShowChat] = useState(false);
+	const [showOriginalGlossary, setShowOriginalGlossary] = useState(false);
+	const [originalGlossaryTerms, setOriginalGlossaryTerms] = useState<
+		GlossaryTermPair[]
+	>([]);
+	/** 헤더 제목·원문 URL 길게/짧게 보기 */
+	const [headerMetaExpanded, setHeaderMetaExpanded] = useState(false);
 
-  // 패널 토글
-  const togglePanel = (panelId: string) => {
-    setCollapsedPanels(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(panelId)) {
-        newSet.delete(panelId);
-      } else {
-        newSet.add(panelId);
-      }
-      return newSet;
-    });
-  };
+	// iframe refs
+	const originalIframeRef = useRef<HTMLIFrameElement>(null);
+	const aiDraftIframeRef = useRef<HTMLIFrameElement>(null);
+	const currentWorkIframeRef = useRef<HTMLIFrameElement>(null);
 
-  // 전체화면 토글
-  const toggleFullscreen = (panelId: string) => {
-    setFullscreenPanel(prev => prev === panelId ? null : panelId);
-  };
+	useEffect(() => {
+		setHeaderMetaExpanded(false);
+	}, [id]);
 
-  // 번역 대기로 전환 (from=handover 시 관리자 액션)
-  const handleConvertToPending = async () => {
-    if (!documentId || !document) return;
-    if (!window.confirm(`"${document.title}" 문서를 번역 대기 상태로 전환하시겠습니까?`)) return;
-    try {
-      setConvertingToPending(true);
-      const versions = await documentApi.getDocumentVersions(documentId);
-      const latestTranslation = versions
-        .filter((v) => v.versionType === 'MANUAL_TRANSLATION' || v.versionType === 'AI_DRAFT')
-        .sort((a, b) => b.versionNumber - a.versionNumber)[0];
-      if (latestTranslation?.content) {
-        await documentApi.createDocumentVersion(documentId, {
-          versionType: 'MANUAL_TRANSLATION',
-          content: latestTranslation.content,
-        });
-      }
-      await documentApi.updateDocumentStatus(documentId, 'PENDING_TRANSLATION');
-      setDocument((prev) => prev ? { ...prev, status: 'PENDING_TRANSLATION' } : null);
-      // 새 버전 반영을 위해 버전 목록 다시 로드
-      const newVersions = await documentApi.getDocumentVersions(documentId);
-      setVersions(newVersions);
-      const aiDraft = newVersions.find((v) => v.versionType === 'AI_DRAFT');
-      const latestManual = newVersions
-        .filter((v) => v.versionType === 'MANUAL_TRANSLATION')
-        .sort((a, b) => b.versionNumber - a.versionNumber)[0];
-      const newCurrent = latestManual || aiDraft;
-      if (newCurrent) {
-        setCurrentVersionInfo({ version: newCurrent, versionType: newCurrent.versionType });
-        setCurrentVersionHtml(newCurrent.content);
-      }
-      alert('번역 대기 상태로 전환했습니다.');
-    } catch (err: any) {
-      console.error('번역 대기 전환 실패:', err);
-      alert('번역 대기로 전환에 실패했습니다.');
-    } finally {
-      setConvertingToPending(false);
-    }
-  };
+	// 패널 토글
+	const togglePanel = (panelId: string) => {
+		setCollapsedPanels((prev) => {
+			const newSet = new Set(prev);
+			if (newSet.has(panelId)) {
+				newSet.delete(panelId);
+			} else {
+				newSet.add(panelId);
+			}
+			return newSet;
+		});
+	};
 
-  // 초기 데이터 로드
-  useEffect(() => {
-    if (!documentId) {
-      setError('문서 ID가 없습니다.');
-      setLoading(false);
-      return;
-    }
+	// 전체화면 토글
+	const toggleFullscreen = (panelId: string) => {
+		setFullscreenPanel((prev) => (prev === panelId ? null : panelId));
+	};
 
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+	// 번역 대기로 전환 (from=handover 시 관리자 액션)
+	const handleConvertToPending = async () => {
+		if (!documentId || !document) return;
+		if (
+			!window.confirm(
+				`"${document.title}" 문서를 번역 대기 상태로 전환하시겠습니까?`,
+			)
+		)
+			return;
+		try {
+			setConvertingToPending(true);
+			const versions = await documentApi.getDocumentVersions(documentId);
+			const latestTranslation = versions
+				.filter(
+					(v) =>
+						v.versionType === "MANUAL_TRANSLATION" ||
+						v.versionType === "AI_DRAFT",
+				)
+				.sort((a, b) => b.versionNumber - a.versionNumber)[0];
+			if (latestTranslation?.content) {
+				await documentApi.createDocumentVersion(documentId, {
+					versionType: "MANUAL_TRANSLATION",
+					content: latestTranslation.content,
+				});
+			}
+			await documentApi.updateDocumentStatus(documentId, "PENDING_TRANSLATION");
+			setDocument((prev) =>
+				prev ? { ...prev, status: "PENDING_TRANSLATION" } : null,
+			);
+			// 새 버전 반영을 위해 버전 목록 다시 로드
+			const newVersions = await documentApi.getDocumentVersions(documentId);
+			setVersions(newVersions);
+			const aiDraft = newVersions.find((v) => v.versionType === "AI_DRAFT");
+			const latestManual = newVersions
+				.filter((v) => v.versionType === "MANUAL_TRANSLATION")
+				.sort((a, b) => b.versionNumber - a.versionNumber)[0];
+			const newCurrent = latestManual || aiDraft;
+			if (newCurrent) {
+				setCurrentVersionInfo({
+					version: newCurrent,
+					versionType: newCurrent.versionType,
+				});
+				setCurrentVersionHtml(newCurrent.content);
+			}
+			alert("번역 대기 상태로 전환했습니다.");
+		} catch (err: any) {
+			console.error("번역 대기 전환 실패:", err);
+			alert("번역 대기로 전환에 실패했습니다.");
+		} finally {
+			setConvertingToPending(false);
+		}
+	};
 
-        // 1. 문서 정보 가져오기
-        const doc = await documentApi.getDocument(documentId);
-        setDocument(doc);
+	// 초기 데이터 로드
+	useEffect(() => {
+		if (!documentId) {
+			setError("문서 ID가 없습니다.");
+			setLoading(false);
+			return;
+		}
 
-        // 원문(Version 0)용 용어집 sourceTerm 로드
-        try {
-          const sourceLangRaw = (doc.sourceLang || '').toUpperCase();
-          const sourceLang = sourceLangRaw === 'AUTO' ? 'EN' : sourceLangRaw;
-          const targetLang = (doc.targetLang || '').toUpperCase();
-          if (sourceLang && targetLang) {
-            const termRes = await termApi.getAllTerms({ sourceLang, targetLang, page: 0, size: 1000 });
-            setOriginalGlossaryTerms(
-              (termRes.content || [])
-                .filter((t) => t.sourceTerm && t.targetTerm)
-                .map((t) => ({ sourceTerm: t.sourceTerm, targetTerm: t.targetTerm }))
-            );
-          } else {
-            setOriginalGlossaryTerms([]);
-          }
-        } catch (e) {
-          console.warn('원문 용어집 로드 실패:', e);
-          setOriginalGlossaryTerms([]);
-        }
+		const loadData = async () => {
+			try {
+				setLoading(true);
+				setError(null);
 
-        // 2. 문서 버전 목록 가져오기
-        const versionList = await documentApi.getDocumentVersions(documentId);
-        setVersions(versionList);
+				// 1. 문서 정보 가져오기
+				const doc = await documentApi.getDocument(documentId);
+				setDocument(doc);
 
-        // 3. 버전별 HTML 콘텐츠 설정
-        const originalVersion = versionList.find(v => v.versionType === 'ORIGINAL');
-        const aiDraftVersion = versionList.find(v => v.versionType === 'AI_DRAFT');
-        
-        // 현재 버전 결정 (문서 상태에 따라)
-        let currentVersion: DocumentVersionResponse | undefined;
-        let currentVersionType = '';
-        const status = doc.status as DocumentState;
-        
-        if (status === DocumentState.PUBLISHED || status === DocumentState.APPROVED) {
-          // 게시 완료/승인 완료:
-          // 1) isFinal=true 인 버전 우선
-          // 2) 없으면 versionType === 'FINAL'
-          // 3) 그래도 없으면 가장 최신 MANUAL_TRANSLATION
-          const finalByFlag = versionList.find(v => v.isFinal === true);
-          const finalByType = versionList.find(v => v.versionType === 'FINAL');
-          const latestManual = versionList
-            .filter(v => v.versionType === 'MANUAL_TRANSLATION')
-            .sort((a, b) => b.versionNumber - a.versionNumber)[0];
-          
-          currentVersion = finalByFlag || finalByType || latestManual;
-          if (currentVersion) {
-            currentVersionType = currentVersion.isFinal ? 'FINAL' : currentVersion.versionType;
-          }
-        } else if (status === DocumentState.PENDING_REVIEW) {
-          // 검토 중: FINAL(플래그/타입) 또는 MANUAL_TRANSLATION
-          const finalByFlag = versionList.find(v => v.isFinal === true);
-          const finalByType = versionList.find(v => v.versionType === 'FINAL');
-          currentVersion = finalByFlag || finalByType ||
-                          versionList.find(v => v.versionType === 'MANUAL_TRANSLATION');
-          currentVersionType = currentVersion
-            ? (currentVersion.isFinal ? 'FINAL' : currentVersion.versionType)
-            : '';
-        } else if (status === DocumentState.IN_TRANSLATION) {
-          // 번역 중: MANUAL_TRANSLATION (있다면), 없으면 AI_DRAFT
-          currentVersion = versionList.find(v => v.versionType === 'MANUAL_TRANSLATION') ||
-                          aiDraftVersion;
-          currentVersionType = currentVersion?.versionType || '';
-        } else if (status === DocumentState.DRAFT || status === DocumentState.PENDING_TRANSLATION) {
-          // 초안/번역 대기: MANUAL_TRANSLATION 최신, 없으면 AI_DRAFT
-          const latestManual = versionList
-            .filter(v => v.versionType === 'MANUAL_TRANSLATION')
-            .sort((a, b) => b.versionNumber - a.versionNumber)[0];
-          currentVersion = latestManual || aiDraftVersion;
-          currentVersionType = currentVersion?.versionType || '';
-        }
+				// 원문(Version 0)용 용어집 sourceTerm 로드
+				try {
+					const sourceLangRaw = (doc.sourceLang || "").toUpperCase();
+					const sourceLang = sourceLangRaw === "AUTO" ? "EN" : sourceLangRaw;
+					const targetLang = (doc.targetLang || "").toUpperCase();
+					if (sourceLang && targetLang) {
+						const termRes = await termApi.getAllTerms({
+							sourceLang,
+							targetLang,
+							page: 0,
+							size: 1000,
+						});
+						setOriginalGlossaryTerms(
+							(termRes.content || [])
+								.filter((t) => t.sourceTerm && t.targetTerm)
+								.map((t) => ({
+									sourceTerm: t.sourceTerm,
+									targetTerm: t.targetTerm,
+								})),
+						);
+					} else {
+						setOriginalGlossaryTerms([]);
+					}
+				} catch (e) {
+					console.warn("원문 용어집 로드 실패:", e);
+					setOriginalGlossaryTerms([]);
+				}
 
-        setOriginalHtml(originalVersion?.content || '');
-        setAiDraftHtml(removeLegacyGlossaryMarkup(aiDraftVersion?.content || ''));
-        setCurrentVersionHtml(currentVersion?.content || '');
-        setCurrentVersionInfo({ 
-          version: currentVersion || null, 
-          versionType: currentVersionType 
-        });
+				// 2. 문서 버전 목록 가져오기
+				const versionList = await documentApi.getDocumentVersions(documentId);
+				setVersions(versionList);
 
-      } catch (err: any) {
-        console.error('문서 상세 정보 로드 실패:', err);
-        setError(err.response?.data?.message || '문서 정보를 불러오는데 실패했습니다.');
-      } finally {
-        setLoading(false);
-      }
-    };
+				// 3. 버전별 HTML 콘텐츠 설정
+				const originalVersion = versionList.find(
+					(v) => v.versionType === "ORIGINAL",
+				);
+				const aiDraftVersion = versionList.find(
+					(v) => v.versionType === "AI_DRAFT",
+				);
 
-    loadData();
-  }, [documentId]);
+				// 현재 버전 결정 (문서 상태에 따라)
+				let currentVersion: DocumentVersionResponse | undefined;
+				let currentVersionType = "";
+				const status = doc.status as DocumentState;
 
-  // 원문 iframe 렌더링
-  useEffect(() => {
-    const iframe = originalIframeRef.current;
-    if (!iframe || !originalHtml) return;
+				if (
+					status === DocumentState.PUBLISHED ||
+					status === DocumentState.APPROVED
+				) {
+					// 게시 완료/승인 완료:
+					// 1) isFinal=true 인 버전 우선
+					// 2) 없으면 versionType === 'FINAL'
+					// 3) 그래도 없으면 가장 최신 MANUAL_TRANSLATION
+					const finalByFlag = versionList.find((v) => v.isFinal === true);
+					const finalByType = versionList.find(
+						(v) => v.versionType === "FINAL",
+					);
+					const latestManual = versionList
+						.filter((v) => v.versionType === "MANUAL_TRANSLATION")
+						.sort((a, b) => b.versionNumber - a.versionNumber)[0];
 
-    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (iframeDoc) {
-      try {
-        iframeDoc.open();
-        iframeDoc.write(originalHtml);
-        iframeDoc.close();
+					currentVersion = finalByFlag || finalByType || latestManual;
+					if (currentVersion) {
+						currentVersionType = currentVersion.isFinal
+							? "FINAL"
+							: currentVersion.versionType;
+					}
+				} else if (status === DocumentState.PENDING_REVIEW) {
+					// 검토 중: FINAL(플래그/타입) 또는 MANUAL_TRANSLATION
+					const finalByFlag = versionList.find((v) => v.isFinal === true);
+					const finalByType = versionList.find(
+						(v) => v.versionType === "FINAL",
+					);
+					currentVersion =
+						finalByFlag ||
+						finalByType ||
+						versionList.find((v) => v.versionType === "MANUAL_TRANSLATION");
+					currentVersionType = currentVersion
+						? currentVersion.isFinal
+							? "FINAL"
+							: currentVersion.versionType
+						: "";
+				} else if (status === DocumentState.IN_TRANSLATION) {
+					// 번역 중: MANUAL_TRANSLATION (있다면), 없으면 AI_DRAFT
+					currentVersion =
+						versionList.find((v) => v.versionType === "MANUAL_TRANSLATION") ||
+						aiDraftVersion;
+					currentVersionType = currentVersion?.versionType || "";
+				} else if (
+					status === DocumentState.DRAFT ||
+					status === DocumentState.PENDING_TRANSLATION
+				) {
+					// 초안/번역 대기: MANUAL_TRANSLATION 최신, 없으면 AI_DRAFT
+					const latestManual = versionList
+						.filter((v) => v.versionType === "MANUAL_TRANSLATION")
+						.sort((a, b) => b.versionNumber - a.versionNumber)[0];
+					currentVersion = latestManual || aiDraftVersion;
+					currentVersionType = currentVersion?.versionType || "";
+				}
 
-        // 경계선 제거 + 원문 용어 표시 CSS 주입
-        const style = iframeDoc.createElement('style');
-        style.textContent = `
+				setOriginalHtml(originalVersion?.content || "");
+				setAiDraftHtml(
+					removeLegacyGlossaryMarkup(aiDraftVersion?.content || ""),
+				);
+				setCurrentVersionHtml(currentVersion?.content || "");
+				setCurrentVersionInfo({
+					version: currentVersion || null,
+					versionType: currentVersionType,
+				});
+			} catch (err: any) {
+				console.error("문서 상세 정보 로드 실패:", err);
+				setError(
+					err.response?.data?.message || "문서 정보를 불러오는데 실패했습니다.",
+				);
+			} finally {
+				setLoading(false);
+			}
+		};
+
+		loadData();
+	}, [documentId]);
+
+	// 원문 iframe 렌더링
+	useEffect(() => {
+		const iframe = originalIframeRef.current;
+		if (!iframe || !originalHtml) return;
+
+		const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+		if (iframeDoc) {
+			try {
+				iframeDoc.open();
+				iframeDoc.write(originalHtml);
+				iframeDoc.close();
+
+				// 경계선 제거 + 원문 용어 표시 CSS 주입
+				const style = iframeDoc.createElement("style");
+				style.textContent = `
           * {
             border: none !important;
             outline: none !important;
@@ -355,38 +428,44 @@ export default function DocumentDetail() {
             padding: 0 2px;
           }
         `;
-        iframeDoc.head.appendChild(style);
+				iframeDoc.head.appendChild(style);
 
-        if (showOriginalGlossary) {
-          highlightGlossaryInOriginalIframe(iframeDoc, originalGlossaryTerms);
-        }
+				if (showOriginalGlossary) {
+					highlightGlossaryInOriginalIframe(iframeDoc, originalGlossaryTerms);
+				}
 
-        // 편집 불가능하게 설정
-        if (iframeDoc.body) {
-          iframeDoc.body.style.cursor = 'default';
-          iframeDoc.body.contentEditable = 'false';
-        }
-      } catch (error) {
-        console.error('❌ 원문 iframe 오류:', error);
-      }
-    }
-  }, [originalHtml, collapsedPanels, fullscreenPanel, showOriginalGlossary, originalGlossaryTerms]);
+				// 편집 불가능하게 설정
+				if (iframeDoc.body) {
+					iframeDoc.body.style.cursor = "default";
+					iframeDoc.body.contentEditable = "false";
+				}
+			} catch (error) {
+				console.error("❌ 원문 iframe 오류:", error);
+			}
+		}
+	}, [
+		originalHtml,
+		collapsedPanels,
+		fullscreenPanel,
+		showOriginalGlossary,
+		originalGlossaryTerms,
+	]);
 
-  // AI 초벌 번역 iframe 렌더링
-  useEffect(() => {
-    const iframe = aiDraftIframeRef.current;
-    if (!iframe || !aiDraftHtml) return;
+	// AI 초벌 번역 iframe 렌더링
+	useEffect(() => {
+		const iframe = aiDraftIframeRef.current;
+		if (!iframe || !aiDraftHtml) return;
 
-    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (iframeDoc) {
-      try {
-        iframeDoc.open();
-        iframeDoc.write(aiDraftHtml);
-        iframeDoc.close();
+		const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+		if (iframeDoc) {
+			try {
+				iframeDoc.open();
+				iframeDoc.write(aiDraftHtml);
+				iframeDoc.close();
 
-        // 경계선 제거 CSS 주입
-        const style = iframeDoc.createElement('style');
-        style.textContent = `
+				// 경계선 제거 CSS 주입
+				const style = iframeDoc.createElement("style");
+				style.textContent = `
           * {
             border: none !important;
             outline: none !important;
@@ -395,34 +474,34 @@ export default function DocumentDetail() {
             cursor: default !important;
           }
         `;
-        iframeDoc.head.appendChild(style);
+				iframeDoc.head.appendChild(style);
 
-        // 편집 불가능하게 설정
-        if (iframeDoc.body) {
-          iframeDoc.body.style.cursor = 'default';
-          iframeDoc.body.contentEditable = 'false';
-        }
-      } catch (error) {
-        console.error('❌ AI 초벌 iframe 오류:', error);
-      }
-    }
-  }, [aiDraftHtml, collapsedPanels, fullscreenPanel]);
+				// 편집 불가능하게 설정
+				if (iframeDoc.body) {
+					iframeDoc.body.style.cursor = "default";
+					iframeDoc.body.contentEditable = "false";
+				}
+			} catch (error) {
+				console.error("❌ AI 초벌 iframe 오류:", error);
+			}
+		}
+	}, [aiDraftHtml, collapsedPanels, fullscreenPanel]);
 
-  // 현재 버전 iframe 렌더링
-  useEffect(() => {
-    const iframe = currentWorkIframeRef.current;
-    if (!iframe || !currentVersionHtml) return;
+	// 현재 버전 iframe 렌더링
+	useEffect(() => {
+		const iframe = currentWorkIframeRef.current;
+		if (!iframe || !currentVersionHtml) return;
 
-    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (iframeDoc) {
-      try {
-        iframeDoc.open();
-        iframeDoc.write(currentVersionHtml);
-        iframeDoc.close();
+		const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+		if (iframeDoc) {
+			try {
+				iframeDoc.open();
+				iframeDoc.write(currentVersionHtml);
+				iframeDoc.close();
 
-        // 경계선 제거 CSS 주입
-        const style = iframeDoc.createElement('style');
-        style.textContent = `
+				// 경계선 제거 CSS 주입
+				const style = iframeDoc.createElement("style");
+				style.textContent = `
           * {
             border: none !important;
             outline: none !important;
@@ -431,686 +510,925 @@ export default function DocumentDetail() {
             cursor: default !important;
           }
         `;
-        iframeDoc.head.appendChild(style);
+				iframeDoc.head.appendChild(style);
 
-        // 편집 불가능하게 설정
-        if (iframeDoc.body) {
-          iframeDoc.body.style.cursor = 'default';
-          iframeDoc.body.contentEditable = 'false';
-        }
-      } catch (error) {
-        console.error('❌ 현재 버전 iframe 오류:', error);
-      }
-    }
-  }, [currentVersionHtml, collapsedPanels, fullscreenPanel]);
+				// 편집 불가능하게 설정
+				if (iframeDoc.body) {
+					iframeDoc.body.style.cursor = "default";
+					iframeDoc.body.contentEditable = "false";
+				}
+			} catch (error) {
+				console.error("❌ 현재 버전 iframe 오류:", error);
+			}
+		}
+	}, [currentVersionHtml, collapsedPanels, fullscreenPanel]);
 
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '100vh',
-          color: colors.primaryText,
-        }}
-      >
-        로딩 중...
-      </div>
-    );
-  }
+	if (loading) {
+		return (
+			<div
+				style={{
+					display: "flex",
+					justifyContent: "center",
+					alignItems: "center",
+					height: "100vh",
+					color: colors.primaryText,
+				}}
+			>
+				로딩 중...
+			</div>
+		);
+	}
 
-  if (error) {
-    return (
-      <div
-        style={{
-          padding: '24px',
-          backgroundColor: colors.primaryBackground,
-          minHeight: '100vh',
-        }}
-      >
-        <div
-          style={{
-            maxWidth: '1600px',
-            margin: '0 auto',
-            padding: '24px',
-            backgroundColor: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: '8px',
-          }}
-        >
-          <h2 style={{ color: '#d32f2f', marginBottom: '16px' }}>오류</h2>
-          <p style={{ color: colors.primaryText, marginBottom: '16px' }}>{error}</p>
-          <Button variant="secondary" onClick={() => navigate(from === 'pending' ? '/translations/pending' : from === 'working' ? '/translations/working' : from === 'favorites' ? '/translations/favorites' : '/documents')}>
-            문서 목록으로 돌아가기
-          </Button>
-        </div>
-      </div>
-    );
-  }
+	if (error) {
+		return (
+			<div
+				style={{
+					padding: "24px",
+					backgroundColor: colors.primaryBackground,
+					minHeight: "100vh",
+				}}
+			>
+				<div
+					style={{
+						maxWidth: "1600px",
+						margin: "0 auto",
+						padding: "24px",
+						backgroundColor: colors.surface,
+						border: `1px solid ${colors.border}`,
+						borderRadius: "8px",
+					}}
+				>
+					<h2 style={{ color: "#d32f2f", marginBottom: "16px" }}>오류</h2>
+					<p style={{ color: colors.primaryText, marginBottom: "16px" }}>
+						{error}
+					</p>
+					<Button
+						variant="secondary"
+						onClick={() =>
+							navigate(
+								from === "pending"
+									? "/translations/pending"
+									: from === "working"
+										? "/translations/working"
+										: from === "favorites"
+											? "/translations/favorites"
+											: "/documents",
+							)
+						}
+					>
+						문서 목록으로 돌아가기
+					</Button>
+				</div>
+			</div>
+		);
+	}
 
-  if (!document) {
-    return (
-      <div
-        style={{
-          padding: '24px',
-          backgroundColor: colors.primaryBackground,
-          minHeight: '100vh',
-        }}
-      >
-        <div
-          style={{
-            maxWidth: '1600px',
-            margin: '0 auto',
-            padding: '24px',
-            backgroundColor: colors.surface,
-            border: `1px solid ${colors.border}`,
-            borderRadius: '8px',
-          }}
-        >
-          <p style={{ color: colors.primaryText }}>문서를 찾을 수 없습니다.</p>
-          <Button variant="secondary" onClick={() => navigate(from === 'pending' ? '/translations/pending' : from === 'working' ? '/translations/working' : from === 'favorites' ? '/translations/favorites' : '/documents')}>
-            문서 목록으로 돌아가기
-          </Button>
-        </div>
-      </div>
-    );
-  }
+	if (!document) {
+		return (
+			<div
+				style={{
+					padding: "24px",
+					backgroundColor: colors.primaryBackground,
+					minHeight: "100vh",
+				}}
+			>
+				<div
+					style={{
+						maxWidth: "1600px",
+						margin: "0 auto",
+						padding: "24px",
+						backgroundColor: colors.surface,
+						border: `1px solid ${colors.border}`,
+						borderRadius: "8px",
+					}}
+				>
+					<p style={{ color: colors.primaryText }}>문서를 찾을 수 없습니다.</p>
+					<Button
+						variant="secondary"
+						onClick={() =>
+							navigate(
+								from === "pending"
+									? "/translations/pending"
+									: from === "working"
+										? "/translations/working"
+										: from === "favorites"
+											? "/translations/favorites"
+											: "/documents",
+							)
+						}
+					>
+						문서 목록으로 돌아가기
+					</Button>
+				</div>
+			</div>
+		);
+	}
 
-  // 현재 버전 제목 결정 (버전 번호 + FINAL 여부 포함)
-  const getCurrentVersionTitle = (): string => {
-    if (currentVersionInfo.version) {
-      const isFinal =
-        currentVersionInfo.version.isFinal === true ||
-        currentVersionInfo.versionType === 'FINAL';
-      if (isFinal) {
-        return `현재 버전 (FINAL · Version ${currentVersionInfo.version.versionNumber})`;
-      }
-      return `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`;
-    }
-    return '현재 버전';
-  };
+	// 현재 버전 제목 결정 (버전 번호 + FINAL 여부 포함)
+	const getCurrentVersionTitle = (): string => {
+		if (currentVersionInfo.version) {
+			const isFinal =
+				currentVersionInfo.version.isFinal === true ||
+				currentVersionInfo.versionType === "FINAL";
+			if (isFinal) {
+				return `현재 버전 (FINAL · Version ${currentVersionInfo.version.versionNumber})`;
+			}
+			return `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`;
+		}
+		return "현재 버전";
+	};
 
-  const panels = [
-    { 
-      id: 'original', 
-      title: '원문 (Version 0)', 
-      ref: originalIframeRef, 
-      html: originalHtml,
-      hasContent: !!originalHtml,
-    },
-    { 
-      id: 'aiDraft', 
-      title: 'AI 초벌 번역 (Version 1)', 
-      ref: aiDraftIframeRef, 
-      html: aiDraftHtml,
-      hasContent: !!aiDraftHtml,
-    },
-    { 
-      id: 'currentVersion', 
-      title: getCurrentVersionTitle(), 
-      ref: currentWorkIframeRef, 
-      html: currentVersionHtml,
-      hasContent: !!currentVersionHtml,
-    },
-  ];
+	const panels = [
+		{
+			id: "original",
+			title: "원문 (Version 0)",
+			ref: originalIframeRef,
+			html: originalHtml,
+			hasContent: !!originalHtml,
+		},
+		{
+			id: "aiDraft",
+			title: "AI 초벌 번역 (Version 1)",
+			ref: aiDraftIframeRef,
+			html: aiDraftHtml,
+			hasContent: !!aiDraftHtml,
+		},
+		{
+			id: "currentVersion",
+			title: getCurrentVersionTitle(),
+			ref: currentWorkIframeRef,
+			html: currentVersionHtml,
+			hasContent: !!currentVersionHtml,
+		},
+	];
 
-  const visiblePanels = panels.filter(p => !collapsedPanels.has(p.id) && p.hasContent);
-  const hasFullscreen = fullscreenPanel !== null;
+	const visiblePanels = panels.filter(
+		(p) => !collapsedPanels.has(p.id) && p.hasContent,
+	);
+	const hasFullscreen = fullscreenPanel !== null;
 
-  return (
-    <ErrorBoundary>
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100vh',
-          backgroundColor: colors.primaryBackground,
-        }}
-      >
-        {/* 헤더 */}
-        <div
-          style={{
-            padding: '12px 24px',
-            backgroundColor: colors.surface,
-            borderBottom: `1px solid ${colors.border}`,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '16px',
-            minWidth: 0,
-            maxWidth: '100%',
-            boxSizing: 'border-box',
-          }}
-        >
-          {/* 왼쪽: 뒤로가기 + 문서 정보 (minWidth:0으로 flex 안에서 줄어들 수 있게) */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-              flex: 1,
-              minWidth: 0,
-              overflow: 'hidden',
-            }}
-          >
-            <Button
-              variant="secondary"
-              onClick={() => navigate(
-                from === 'pending' ? '/translations/pending'
-                : from === 'working' ? '/translations/working'
-                : from === 'favorites' ? '/translations/favorites'
-                : from === 'handover' ? '/documents/handovers'
-                : '/documents'
-              )}
-              style={{ fontSize: '12px', padding: '6px 12px', flexShrink: 0 }}
-            >
-              ← 뒤로가기
-            </Button>
+	return (
+		<ErrorBoundary>
+			<div
+				style={{
+					display: "flex",
+					flexDirection: "column",
+					height: "100vh",
+					backgroundColor: colors.primaryBackground,
+				}}
+			>
+				{/* 헤더 */}
+				<div
+					style={{
+						padding: "12px 24px",
+						backgroundColor: colors.surface,
+						borderBottom: `1px solid ${colors.border}`,
+						display: "flex",
+						justifyContent: "space-between",
+						alignItems: "center",
+						gap: "16px",
+						minWidth: 0,
+						maxWidth: "100%",
+						boxSizing: "border-box",
+					}}
+				>
+					{/* 왼쪽: 뒤로가기 + 문서 정보 (minWidth:0으로 flex 안에서 줄어들 수 있게) */}
+					<div
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: "16px",
+							flex: 1,
+							minWidth: 0,
+							overflow: "hidden",
+						}}
+					>
+						<Button
+							variant="secondary"
+							onClick={() =>
+								navigate(
+									from === "pending"
+										? "/translations/pending"
+										: from === "working"
+											? "/translations/working"
+											: from === "favorites"
+												? "/translations/favorites"
+												: from === "handover"
+													? "/documents/handovers"
+													: "/documents",
+								)
+							}
+							style={{ fontSize: "12px", padding: "6px 12px", flexShrink: 0 }}
+						>
+							← 뒤로가기
+						</Button>
 
-            {document && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  minWidth: 0,
-                  flex: 1,
-                  overflow: 'hidden',
-                }}
-              >
-                {document.latestHandover && from === 'handover' && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => setShowHandoverModal(true)}
-                    style={{ fontSize: '12px', padding: '6px 12px', whiteSpace: 'nowrap', flexShrink: 0, borderColor: '#FFB300', color: '#B8860B', backgroundColor: '#FFFDE7' }}
-                  >
-                    📋 인계 메모 확인
-                  </Button>
-                )}
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px',
-                    minWidth: 0,
-                    flex: 1,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: '12px',
-                      color: colors.secondaryText,
-                      marginBottom: '2px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    최근 수정: {formatLastModifiedDateDisplay(document.updatedAt) || '-'}
-                  </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '6px',
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    id="document-detail-header-meta"
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      maxHeight: headerMetaExpanded ? 'min(32vh, 240px)' : undefined,
-                      overflowY: headerMetaExpanded ? 'auto' : 'hidden',
-                      overflowX: 'hidden',
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: '#000000',
-                        minWidth: 0,
-                        ...(headerMetaExpanded
-                          ? {
-                              whiteSpace: 'normal',
-                              wordBreak: 'break-word',
-                            }
-                          : {
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }),
-                      }}
-                      title={headerMetaExpanded ? undefined : document.title}
-                    >
-                      {document.title}
-                    </div>
-                    {document.originalUrl?.trim() && (
-                      <div
-                        style={{
-                          marginTop: '6px',
-                          display: 'flex',
-                          alignItems: headerMetaExpanded ? 'flex-start' : 'center',
-                          gap: '6px',
-                          minWidth: 0,
-                          maxWidth: '100%',
-                          flexDirection: headerMetaExpanded ? 'column' : 'row',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: '12px',
-                            color: colors.secondaryText,
-                            flexShrink: 0,
-                          }}
-                        >
-                          원문 URL:
-                        </span>
-                        <a
-                          href={document.originalUrl.trim()}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={
-                            headerMetaExpanded
-                              ? undefined
-                              : document.originalUrl.trim()
-                          }
-                          style={{
-                            fontSize: '12px',
-                            color: '#2563eb',
-                            textDecoration: 'none',
-                            minWidth: 0,
-                            ...(headerMetaExpanded
-                              ? {
-                                  wordBreak: 'break-all',
-                                  whiteSpace: 'normal',
-                                }
-                              : {
-                                  flex: 1,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }),
-                          }}
-                        >
-                          {document.originalUrl.trim()}
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    aria-expanded={headerMetaExpanded}
-                    aria-controls="document-detail-header-meta"
-                    title={headerMetaExpanded ? '짧게 보기' : '길게 보기'}
-                    onClick={() => setHeaderMetaExpanded((v) => !v)}
-                    style={{
-                      flexShrink: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: '28px',
-                      height: '28px',
-                      padding: 0,
-                      marginTop: '1px',
-                      border: `1px solid ${colors.border}`,
-                      borderRadius: '6px',
-                      backgroundColor: colors.surface,
-                      color: colors.primaryText,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {headerMetaExpanded ? (
-                      <ChevronUp size={18} strokeWidth={2} aria-hidden />
-                    ) : (
-                      <ChevronDown size={18} strokeWidth={2} aria-hidden />
-                    )}
-                  </button>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: '12px',
-                    alignItems: 'center',
-                    minWidth: 0,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      color: colors.secondaryText,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {document.categoryId ? `카테고리 ${document.categoryId}` : '미분류'} · {
-                      currentVersionInfo.version 
-                        ? currentVersionInfo.version.isFinal === true || currentVersionInfo.versionType === 'FINAL'
-                          ? `FINAL · Version ${currentVersionInfo.version.versionNumber}`
-                          : `Version ${currentVersionInfo.version.versionNumber}`
-                        : document.hasVersions === false 
-                          ? '버전 없음'
-                          : 'Version 1'
-                    }
-                  </span>
-                </div>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* 중앙: 문서 보기 옵션 (체크박스로 각 버전 표시/숨김) */}
-          <div style={{
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '24px',
-            padding: '6px 16px',
-            backgroundColor: '#F8F9FA',
-            borderRadius: '6px',
-            border: '1px solid #D3D3D3',
-            flexShrink: 0,
-          }}>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: colors.primaryText }}>문서 보기:</span>
-            <label style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '13px',
-              cursor: 'pointer',
-              fontWeight: 500,
-              color: '#7a4b00',
-            }}>
-              <input
-                type="checkbox"
-                checked={showOriginalGlossary}
-                onChange={(e) => setShowOriginalGlossary(e.target.checked)}
-                style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-              />
-              <span>Version 0 용어집 적용 구간 보기</span>
-            </label>
-            <label style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '8px', 
-              fontSize: '13px', 
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}>
-              <input
-                type="checkbox"
-                checked={!collapsedPanels.has('original')}
-                onChange={() => togglePanel('original')}
-                style={{
-                  cursor: 'pointer',
-                  width: '16px',
-                  height: '16px',
-                }}
-              />
-              <span>원문 (Version 0)</span>
-            </label>
-            <label style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '8px', 
-              fontSize: '13px', 
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}>
-              <input
-                type="checkbox"
-                checked={!collapsedPanels.has('aiDraft')}
-                onChange={() => togglePanel('aiDraft')}
-                style={{ 
-                  cursor: 'pointer',
-                  width: '16px',
-                  height: '16px',
-                }}
-              />
-              <span>AI 초벌 번역 (Version 1)</span>
-            </label>
-            <label style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '8px', 
-              fontSize: '13px', 
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}>
-              <input
-                type="checkbox"
-                checked={!collapsedPanels.has('currentVersion')}
-                onChange={() => togglePanel('currentVersion')}
-                style={{ 
-                  cursor: 'pointer',
-                  width: '16px',
-                  height: '16px',
-                }}
-              />
-              <span>
-                {currentVersionInfo.version 
-                  ? (currentVersionInfo.version.isFinal === true || currentVersionInfo.versionType === 'FINAL'
-                      ? `현재 버전 (FINAL · Version ${currentVersionInfo.version.versionNumber})`
-                      : `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`)
-                  : '현재 버전'}
-              </span>
-            </label>
-          </div>
+						{document && (
+							<div
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: "12px",
+									minWidth: 0,
+									flex: 1,
+									overflow: "hidden",
+								}}
+							>
+								{document.latestHandover && from === "handover" && (
+									<Button
+										variant="secondary"
+										onClick={() => setShowHandoverModal(true)}
+										style={{
+											fontSize: "12px",
+											padding: "6px 12px",
+											whiteSpace: "nowrap",
+											flexShrink: 0,
+											borderColor: "#FFB300",
+											color: "#B8860B",
+											backgroundColor: "#FFFDE7",
+										}}
+									>
+										📋 인계 메모 확인
+									</Button>
+								)}
+								<div
+									style={{
+										display: "flex",
+										flexDirection: "column",
+										gap: "2px",
+										minWidth: 0,
+										flex: 1,
+										overflow: "hidden",
+									}}
+								>
+									<div
+										style={{
+											fontSize: "12px",
+											color: colors.secondaryText,
+											marginBottom: "2px",
+											overflow: "hidden",
+											textOverflow: "ellipsis",
+											whiteSpace: "nowrap",
+										}}
+									>
+										최근 수정:{" "}
+										{formatLastModifiedDateDisplay(document.updatedAt) || "-"}
+									</div>
+									<div
+										style={{
+											display: "flex",
+											alignItems: "flex-start",
+											gap: "6px",
+											minWidth: 0,
+										}}
+									>
+										<div
+											id="document-detail-header-meta"
+											style={{
+												flex: 1,
+												minWidth: 0,
+												maxHeight: headerMetaExpanded
+													? "min(32vh, 240px)"
+													: undefined,
+												overflowY: headerMetaExpanded ? "auto" : "hidden",
+												overflowX: "hidden",
+											}}
+										>
+											<div
+												style={{
+													fontSize: "14px",
+													fontWeight: 600,
+													color: "#000000",
+													minWidth: 0,
+													...(headerMetaExpanded
+														? {
+																whiteSpace: "normal",
+																wordBreak: "break-word",
+															}
+														: {
+																overflow: "hidden",
+																textOverflow: "ellipsis",
+																whiteSpace: "nowrap",
+															}),
+												}}
+												title={headerMetaExpanded ? undefined : document.title}
+											>
+												{document.title}
+											</div>
+											{document.originalUrl?.trim() && (
+												<div
+													style={{
+														marginTop: "6px",
+														display: "flex",
+														alignItems: headerMetaExpanded
+															? "flex-start"
+															: "center",
+														gap: "6px",
+														minWidth: 0,
+														maxWidth: "100%",
+														flexDirection: headerMetaExpanded
+															? "column"
+															: "row",
+													}}
+												>
+													<span
+														style={{
+															fontSize: "12px",
+															color: colors.secondaryText,
+															flexShrink: 0,
+														}}
+													>
+														원문 URL:
+													</span>
+													<a
+														href={document.originalUrl.trim()}
+														target="_blank"
+														rel="noopener noreferrer"
+														title={
+															headerMetaExpanded
+																? undefined
+																: document.originalUrl.trim()
+														}
+														style={{
+															fontSize: "12px",
+															color: "#2563eb",
+															textDecoration: "none",
+															minWidth: 0,
+															...(headerMetaExpanded
+																? {
+																		wordBreak: "break-all",
+																		whiteSpace: "normal",
+																	}
+																: {
+																		flex: 1,
+																		overflow: "hidden",
+																		textOverflow: "ellipsis",
+																		whiteSpace: "nowrap",
+																	}),
+														}}
+													>
+														{document.originalUrl.trim()}
+													</a>
+												</div>
+											)}
+										</div>
+										<button
+											type="button"
+											aria-expanded={headerMetaExpanded}
+											aria-controls="document-detail-header-meta"
+											title={headerMetaExpanded ? "짧게 보기" : "길게 보기"}
+											onClick={() => setHeaderMetaExpanded((v) => !v)}
+											style={{
+												flexShrink: 0,
+												display: "flex",
+												alignItems: "center",
+												justifyContent: "center",
+												width: "28px",
+												height: "28px",
+												padding: 0,
+												marginTop: "1px",
+												border: `1px solid ${colors.border}`,
+												borderRadius: "6px",
+												backgroundColor: colors.surface,
+												color: colors.primaryText,
+												cursor: "pointer",
+											}}
+										>
+											{headerMetaExpanded ? (
+												<ChevronUp size={18} strokeWidth={2} aria-hidden />
+											) : (
+												<ChevronDown size={18} strokeWidth={2} aria-hidden />
+											)}
+										</button>
+									</div>
+									<div
+										style={{
+											display: "flex",
+											gap: "12px",
+											alignItems: "center",
+											minWidth: 0,
+											overflow: "hidden",
+										}}
+									>
+										<span
+											style={{
+												fontSize: "11px",
+												color: colors.secondaryText,
+												overflow: "hidden",
+												textOverflow: "ellipsis",
+												whiteSpace: "nowrap",
+											}}
+										>
+											{document.categoryId
+												? `카테고리 ${document.categoryId}`
+												: "미분류"}{" "}
+											·{" "}
+											{currentVersionInfo.version
+												? currentVersionInfo.version.isFinal === true ||
+													currentVersionInfo.versionType === "FINAL"
+													? `FINAL · Version ${currentVersionInfo.version.versionNumber}`
+													: `Version ${currentVersionInfo.version.versionNumber}`
+												: document.hasVersions === false
+													? "버전 없음"
+													: "Version 1"}
+										</span>
+									</div>
+								</div>
+							</div>
+						)}
+					</div>
 
-          {/* 우측: 채팅 토글 + 액션 버튼 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-            {/* 소통 채팅 토글 */}
-            <button
-              onClick={() => setShowChat(prev => !prev)}
-              title="소통 채팅"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '7px 14px',
-                fontSize: '13px',
-                fontWeight: 500,
-                border: `1px solid ${showChat ? '#3B82F6' : '#D1D5DB'}`,
-                borderRadius: '6px',
-                backgroundColor: showChat ? '#EFF6FF' : '#FFFFFF',
-                color: showChat ? '#3B82F6' : '#374151',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              💬 채팅
-            </button>
+					{/* 중앙: 문서 보기 옵션 (체크박스로 각 버전 표시/숨김) */}
+					<div
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: "24px",
+							padding: "6px 16px",
+							backgroundColor: "#F8F9FA",
+							borderRadius: "6px",
+							border: "1px solid #D3D3D3",
+							flexShrink: 0,
+						}}
+					>
+						<span
+							style={{
+								fontSize: "12px",
+								fontWeight: 600,
+								color: colors.primaryText,
+							}}
+						>
+							문서 보기:
+						</span>
+						<label
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "8px",
+								fontSize: "13px",
+								cursor: "pointer",
+								fontWeight: 500,
+								color: "#7a4b00",
+							}}
+						>
+							<input
+								type="checkbox"
+								checked={showOriginalGlossary}
+								onChange={(e) => setShowOriginalGlossary(e.target.checked)}
+								style={{ cursor: "pointer", width: "16px", height: "16px" }}
+							/>
+							<span>Version 0 용어집 적용 구간 보기</span>
+						</label>
+						<label
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "8px",
+								fontSize: "13px",
+								cursor: "pointer",
+								fontWeight: 500,
+							}}
+						>
+							<input
+								type="checkbox"
+								checked={!collapsedPanels.has("original")}
+								onChange={() => togglePanel("original")}
+								style={{
+									cursor: "pointer",
+									width: "16px",
+									height: "16px",
+								}}
+							/>
+							<span style={{ color: "black" }}>원문 (Version 0)</span>
+						</label>
+						<label
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "8px",
+								fontSize: "13px",
+								cursor: "pointer",
+								fontWeight: 500,
+							}}
+						>
+							<input
+								type="checkbox"
+								checked={!collapsedPanels.has("aiDraft")}
+								onChange={() => togglePanel("aiDraft")}
+								style={{
+									cursor: "pointer",
+									width: "16px",
+									height: "16px",
+								}}
+							/>
+							<span style={{ color: "black" }}>AI 초벌 번역 (Version 1)</span>
+						</label>
+						<label
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "8px",
+								fontSize: "13px",
+								cursor: "pointer",
+								fontWeight: 500,
+							}}
+						>
+							<input
+								type="checkbox"
+								checked={!collapsedPanels.has("currentVersion")}
+								onChange={() => togglePanel("currentVersion")}
+								style={{
+									cursor: "pointer",
+									width: "16px",
+									height: "16px",
+								}}
+							/>
+							<span style={{ color: "black" }}>
+								{currentVersionInfo.version
+									? currentVersionInfo.version.isFinal === true ||
+										currentVersionInfo.versionType === "FINAL"
+										? `현재 버전 (FINAL · Version ${currentVersionInfo.version.versionNumber})`
+										: `현재 버전 (Version ${currentVersionInfo.version.versionNumber})`
+									: "현재 버전"}
+							</span>
+						</label>
+					</div>
 
-            {from === 'handover' ? (
-              document?.status !== 'PENDING_TRANSLATION' ? (
-                <Button
-                  variant="primary"
-                  onClick={handleConvertToPending}
-                  disabled={convertingToPending}
-                  style={{ fontSize: '13px', padding: '8px 20px', whiteSpace: 'nowrap' }}
-                >
-                  {convertingToPending ? '전환 중...' : '번역 대기로 전환'}
-                </Button>
-              ) : (
-                <span style={{ fontSize: '13px', color: '#28A745', fontWeight: 600 }}>전환 완료</span>
-              )
-            ) : document?.status === 'PENDING_TRANSLATION' ? (
-              <Button
-                variant="primary"
-                onClick={() => navigate(`/translations/${documentId}/work`)}
-                style={{ fontSize: '13px', padding: '8px 20px', whiteSpace: 'nowrap' }}
-              >
-                번역하기
-              </Button>
-            ) : null}
-          </div>
-        </div>
+					{/* 우측: 채팅 토글 + 액션 버튼 */}
+					<div
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: "8px",
+							flexShrink: 0,
+						}}
+					>
+						{/* 소통 채팅 토글 */}
+						<button
+							onClick={() => setShowChat((prev) => !prev)}
+							title="소통 채팅"
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "5px",
+								padding: "7px 14px",
+								fontSize: "13px",
+								fontWeight: 500,
+								border: `1px solid ${showChat ? "#3B82F6" : "#D1D5DB"}`,
+								borderRadius: "6px",
+								backgroundColor: showChat ? "#EFF6FF" : "#FFFFFF",
+								color: showChat ? "#3B82F6" : "#374151",
+								cursor: "pointer",
+								whiteSpace: "nowrap",
+							}}
+						>
+							💬 채팅
+						</button>
 
-        {/* 3단 레이아웃 + 채팅 사이드바 */}
-        <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+						{from === "handover" ? (
+							document?.status !== "PENDING_TRANSLATION" ? (
+								<Button
+									variant="primary"
+									onClick={handleConvertToPending}
+									disabled={convertingToPending}
+									style={{
+										fontSize: "13px",
+										padding: "8px 20px",
+										whiteSpace: "nowrap",
+									}}
+								>
+									{convertingToPending ? "전환 중..." : "번역 대기로 전환"}
+								</Button>
+							) : (
+								<span
+									style={{
+										fontSize: "13px",
+										color: "#28A745",
+										fontWeight: 600,
+									}}
+								>
+									전환 완료
+								</span>
+							)
+						) : document?.status === "PENDING_TRANSLATION" ? (
+							<Button
+								variant="primary"
+								onClick={() => navigate(`/translations/${documentId}/work`)}
+								style={{
+									fontSize: "13px",
+									padding: "8px 20px",
+									whiteSpace: "nowrap",
+								}}
+							>
+								번역하기
+							</Button>
+						) : null}
+					</div>
+				</div>
 
-          {/* 문서 패널 영역 */}
-          <div style={{ flex: 1, display: 'flex', gap: '4px', padding: '4px', overflow: 'hidden' }}>
-            {panels.map(panel => {
-              const isCollapsed = collapsedPanels.has(panel.id);
-              const isFullscreen = fullscreenPanel === panel.id;
-              const isHidden = hasFullscreen && !isFullscreen;
+				{/* 3단 레이아웃 + 채팅 사이드바 */}
+				<div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
+					{/* 문서 패널 영역 */}
+					<div
+						style={{
+							flex: 1,
+							display: "flex",
+							gap: "4px",
+							padding: "4px",
+							overflow: "hidden",
+						}}
+					>
+						{panels.map((panel) => {
+							const isCollapsed = collapsedPanels.has(panel.id);
+							const isFullscreen = fullscreenPanel === panel.id;
+							const isHidden = hasFullscreen && !isFullscreen;
 
-              // 콘텐츠가 없으면 패널 숨김
-              if (!panel.hasContent) return null;
-              if (isHidden) return null;
+							// 콘텐츠가 없으면 패널 숨김
+							if (!panel.hasContent) return null;
+							if (isHidden) return null;
 
-              return (
-                <div
-                  key={panel.id}
-                  style={{
-                    flex: isCollapsed ? '0 0 0' : isFullscreen ? '1' : `1 1 ${100 / visiblePanels.length}%`,
-                    display: isCollapsed ? 'none' : 'flex',
-                    flexDirection: 'column',
-                    transition: 'flex 0.2s ease',
-                    minWidth: isCollapsed ? '0' : '200px',
-                  }}
-                >
-                  {/* 패널 헤더 */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '8px 12px',
-                      backgroundColor: '#D3D3D3',
-                      borderRadius: '4px 4px 0 0',
-                      cursor: 'default',
-                      height: '36px',
-                    }}
-                  >
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#000000' }}>
-                      {panel.title}
-                    </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <button
-                        onClick={() => toggleFullscreen(panel.id)}
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: '11px',
-                          border: '1px solid #A9A9A9',
-                          borderRadius: '3px',
-                          backgroundColor: '#FFFFFF',
-                          color: '#000000',
-                          cursor: 'pointer',
-                          fontWeight: 500,
-                        }}
-                        title={isFullscreen ? '확대 해제' : '전체화면 확대'}
-                      >
-                        {isFullscreen ? '축소' : '확대'}
-                      </button>
-                    </div>
-                  </div>
+							return (
+								<div
+									key={panel.id}
+									style={{
+										flex: isCollapsed
+											? "0 0 0"
+											: isFullscreen
+												? "1"
+												: `1 1 ${100 / visiblePanels.length}%`,
+										display: isCollapsed ? "none" : "flex",
+										flexDirection: "column",
+										transition: "flex 0.2s ease",
+										minWidth: isCollapsed ? "0" : "200px",
+									}}
+								>
+									{/* 패널 헤더 */}
+									<div
+										style={{
+											display: "flex",
+											justifyContent: "space-between",
+											alignItems: "center",
+											padding: "8px 12px",
+											backgroundColor: "#D3D3D3",
+											borderRadius: "4px 4px 0 0",
+											cursor: "default",
+											height: "36px",
+										}}
+									>
+										<span
+											style={{
+												fontSize: "12px",
+												fontWeight: 600,
+												color: "#000000",
+											}}
+										>
+											{panel.title}
+										</span>
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "8px",
+											}}
+										>
+											<button
+												onClick={() => toggleFullscreen(panel.id)}
+												style={{
+													padding: "4px 8px",
+													fontSize: "11px",
+													border: "1px solid #A9A9A9",
+													borderRadius: "3px",
+													backgroundColor: "#FFFFFF",
+													color: "#000000",
+													cursor: "pointer",
+													fontWeight: 500,
+												}}
+												title={isFullscreen ? "확대 해제" : "전체화면 확대"}
+											>
+												{isFullscreen ? "축소" : "확대"}
+											</button>
+										</div>
+									</div>
 
-                  {/* 패널 내용 */}
-                  <div
-                    style={{
-                      flex: 1,
-                      border: '1px solid #C0C0C0',
-                      borderTop: 'none',
-                      borderRadius: '0 0 4px 4px',
-                      overflow: 'hidden',
-                      backgroundColor: '#FFFFFF',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      position: 'relative',
-                    }}
-                  >
-                    <iframe
-                      ref={panel.ref}
-                      title={panel.title}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        border: 'none',
-                      }}
-                      sandbox="allow-same-origin allow-scripts"
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+									{/* 패널 내용 */}
+									<div
+										style={{
+											flex: 1,
+											border: "1px solid #C0C0C0",
+											borderTop: "none",
+											borderRadius: "0 0 4px 4px",
+											overflow: "hidden",
+											backgroundColor: "#FFFFFF",
+											display: "flex",
+											flexDirection: "column",
+											position: "relative",
+										}}
+									>
+										<iframe
+											ref={panel.ref}
+											title={panel.title}
+											style={{
+												width: "100%",
+												height: "100%",
+												border: "none",
+											}}
+											sandbox="allow-same-origin allow-scripts"
+										/>
+									</div>
+								</div>
+							);
+						})}
+					</div>
 
-          {/* 소통 채팅 사이드바 */}
-          {showChat && documentId && (
-            <div
-              style={{
-                width: '320px',
-                flexShrink: 0,
-                padding: '4px 4px 4px 0',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              <DocumentChat documentId={documentId} height="100%" />
-            </div>
-          )}
-        </div>
-      </div>
+					{/* 소통 채팅 사이드바 */}
+					{showChat && documentId && (
+						<div
+							style={{
+								width: "320px",
+								flexShrink: 0,
+								padding: "4px 4px 4px 0",
+								display: "flex",
+								flexDirection: "column",
+							}}
+						>
+							<DocumentChat documentId={documentId} height="100%" />
+						</div>
+					)}
+				</div>
+			</div>
 
-      {/* 인계 메모 확인 모달 */}
-      {showHandoverModal && document?.latestHandover && (
-        <div
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={() => setShowHandoverModal(false)}
-        >
-          <div
-            style={{ backgroundColor: colors.surface, borderRadius: '8px', padding: '28px', maxWidth: '500px', width: '90%', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', maxHeight: '90vh', overflowY: 'auto' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ fontSize: '17px', fontWeight: 600, color: '#000000', marginBottom: '20px' }}>
-              인계 메모 확인
-            </h2>
-            <div style={{ backgroundColor: '#FFF9EC', border: '1px solid #FFE082', borderRadius: '6px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {(() => {
-                const h = document.latestHandover!;
-                return (
-                  <>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
-                      <span style={{ fontSize: '12px', color: colors.secondaryText, minWidth: '80px', flexShrink: 0 }}>인계자</span>
-                      <span style={{ fontSize: '13px', color: '#000000' }}>{h.handedOverBy?.name || '-'}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
-                      <span style={{ fontSize: '12px', color: colors.secondaryText, minWidth: '80px', flexShrink: 0 }}>인계 시각</span>
-                      <span style={{ fontSize: '13px', color: '#000000' }}>{formatLastModifiedDateDisplay(h.handedOverAt)}</span>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '12px', color: colors.secondaryText, display: 'block', marginBottom: '6px' }}>남은 작업 메모</span>
-                      <div style={{ fontSize: '13px', color: '#000000', whiteSpace: 'pre-wrap', lineHeight: '1.6', padding: '10px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${colors.border}` }}>
-                        {h.memo || '-'}
-                      </div>
-                    </div>
-                    {h.terms && (
-                      <div>
-                        <span style={{ fontSize: '12px', color: colors.secondaryText, display: 'block', marginBottom: '6px' }}>주의 용어/표현</span>
-                        <div style={{ fontSize: '13px', color: '#000000', whiteSpace: 'pre-wrap', lineHeight: '1.6', padding: '10px', backgroundColor: '#fff', borderRadius: '4px', border: `1px solid ${colors.border}` }}>
-                          {h.terms}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-              <Button variant="secondary" onClick={() => setShowHandoverModal(false)}>
-                닫기
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </ErrorBoundary>
-  );
+			{/* 인계 메모 확인 모달 */}
+			{showHandoverModal && document?.latestHandover && (
+				<div
+					style={{
+						position: "fixed",
+						top: 0,
+						left: 0,
+						right: 0,
+						bottom: 0,
+						backgroundColor: "rgba(0,0,0,0.5)",
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+						zIndex: 1000,
+					}}
+					onClick={() => setShowHandoverModal(false)}
+				>
+					<div
+						style={{
+							backgroundColor: colors.surface,
+							borderRadius: "8px",
+							padding: "28px",
+							maxWidth: "500px",
+							width: "90%",
+							boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+							maxHeight: "90vh",
+							overflowY: "auto",
+						}}
+						onClick={(e) => e.stopPropagation()}
+					>
+						<h2
+							style={{
+								fontSize: "17px",
+								fontWeight: 600,
+								color: "#000000",
+								marginBottom: "20px",
+							}}
+						>
+							인계 메모 확인
+						</h2>
+						<div
+							style={{
+								backgroundColor: "#FFF9EC",
+								border: "1px solid #FFE082",
+								borderRadius: "6px",
+								padding: "16px",
+								display: "flex",
+								flexDirection: "column",
+								gap: "12px",
+							}}
+						>
+							{(() => {
+								const h = document.latestHandover!;
+								return (
+									<>
+										<div
+											style={{
+												display: "flex",
+												gap: "8px",
+												alignItems: "baseline",
+											}}
+										>
+											<span
+												style={{
+													fontSize: "12px",
+													color: colors.secondaryText,
+													minWidth: "80px",
+													flexShrink: 0,
+												}}
+											>
+												인계자
+											</span>
+											<span style={{ fontSize: "13px", color: "#000000" }}>
+												{h.handedOverBy?.name || "-"}
+											</span>
+										</div>
+										<div
+											style={{
+												display: "flex",
+												gap: "8px",
+												alignItems: "baseline",
+											}}
+										>
+											<span
+												style={{
+													fontSize: "12px",
+													color: colors.secondaryText,
+													minWidth: "80px",
+													flexShrink: 0,
+												}}
+											>
+												인계 시각
+											</span>
+											<span style={{ fontSize: "13px", color: "#000000" }}>
+												{formatLastModifiedDateDisplay(h.handedOverAt)}
+											</span>
+										</div>
+										<div>
+											<span
+												style={{
+													fontSize: "12px",
+													color: colors.secondaryText,
+													display: "block",
+													marginBottom: "6px",
+												}}
+											>
+												남은 작업 메모
+											</span>
+											<div
+												style={{
+													fontSize: "13px",
+													color: "#000000",
+													whiteSpace: "pre-wrap",
+													lineHeight: "1.6",
+													padding: "10px",
+													backgroundColor: "#fff",
+													borderRadius: "4px",
+													border: `1px solid ${colors.border}`,
+												}}
+											>
+												{h.memo || "-"}
+											</div>
+										</div>
+										{h.terms && (
+											<div>
+												<span
+													style={{
+														fontSize: "12px",
+														color: colors.secondaryText,
+														display: "block",
+														marginBottom: "6px",
+													}}
+												>
+													주의 용어/표현
+												</span>
+												<div
+													style={{
+														fontSize: "13px",
+														color: "#000000",
+														whiteSpace: "pre-wrap",
+														lineHeight: "1.6",
+														padding: "10px",
+														backgroundColor: "#fff",
+														borderRadius: "4px",
+														border: `1px solid ${colors.border}`,
+													}}
+												>
+													{h.terms}
+												</div>
+											</div>
+										)}
+									</>
+								);
+							})()}
+						</div>
+						<div
+							style={{
+								display: "flex",
+								justifyContent: "flex-end",
+								marginTop: "20px",
+							}}
+						>
+							<Button
+								variant="secondary"
+								onClick={() => setShowHandoverModal(false)}
+							>
+								닫기
+							</Button>
+						</div>
+					</div>
+				</div>
+			)}
+		</ErrorBoundary>
+	);
 }
